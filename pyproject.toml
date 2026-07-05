@@ -1,0 +1,99 @@
+[project]
+name = "ghfanout"
+version = "0.1.0"
+description = "A CLI that distributes shared config files to multiple GitHub repositories as pull requests, using a Kustomize-like base/overlay structure"
+readme = "README.md"
+authors = [
+    { name = "Seiya Kojima" }
+]
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+classifiers = [
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
+dependencies = [
+    "jinja2>=3.1.6",
+    "pathspec>=0.12.1",
+    "pygithub>=2.9.1",
+    "pyyaml>=6.0.3",
+    "typer>=0.26.8",
+]
+
+[project.urls]
+Homepage = "https://github.com/seiya-koji/ghfanout"
+Documentation = "https://seiya-koji.github.io/ghfanout/"
+Repository = "https://github.com/seiya-koji/ghfanout"
+
+[project.scripts]
+ghfanout = "ghfanout.cli:app"
+
+[build-system]
+requires = ["uv_build>=0.10.0,<0.11.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "detect-secrets>=1.5.0",
+    "mypy>=2.1.0",
+    "pre-commit>=4.6.0",
+    "pytest>=9.1.1",
+    "ruff>=0.15.20",
+    "types-pyyaml>=6.0.12.20260518",
+]
+docs = [
+    "mkdocs-material>=9.7.6",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "W",   # pycodestyle warnings
+    "I",   # isort
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "SIM", # flake8-simplify
+    "D",   # pydocstyle (docstring checks)
+    "PL",  # pylint equivalent
+    "RUF", # ruff-specific rules
+    "S",   # flake8-bandit (security)
+    "C4",  # flake8-comprehensions
+    "PT",  # flake8-pytest-style
+    "ARG", # flake8-unused-arguments
+    "PTH", # flake8-use-pathlib
+    "N",   # pep8-naming
+    "A",   # flake8-builtins
+    "DTZ", # flake8-datetimez
+    "TID", # flake8-tidy-imports
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = [
+    "S101",    # assert is fundamental to tests
+    "D1",      # test docstrings are unnecessary (descriptive test names serve that purpose)
+    "PLR2004", # literal comparisons are natural in tests
+    "S105",    # dummy tokens
+]
+
+[tool.mypy]
+strict = true
+python_version = "3.11"
+files = ["src", "tests"]
+
+[[tool.mypy.overrides]]
+module = ["github", "github.*"]
+follow_untyped_imports = true
