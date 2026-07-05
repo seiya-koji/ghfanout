@@ -1,0 +1,44 @@
+# Templates
+
+Files with the `.tmpl` extension are rendered as [Jinja2](https://jinja.palletsprojects.com/) templates and distributed under the name with that extension stripped (e.g. `pom.xml.tmpl` → `pom.xml`). This lets you embed repository-specific values — the repository name, a version number — into otherwise shared files.
+
+## Why only `.tmpl` files?
+
+Files without the `.tmpl` extension are copied as-is, byte for byte. Because rendering is strictly opt-in per file, there is no risk of syntax conflicts with files that contain GitHub Actions' `${{ }}` or Maven's `${}` — those files simply stay untouched unless you deliberately give them a `.tmpl` extension.
+
+## Available variables
+
+| Variable | Description |
+| --- | --- |
+| `{{ repo }}` | Destination repository name (= overlay directory name) |
+| `{{ org }}` | The `org` from `ghfanout.yaml` |
+| `{{ values.xxx }}` | A value defined under `values:` in `manifest.yaml` (can be nested) |
+
+`repo` and `org` are built-in and always available, even without defining any `values`.
+
+## Example
+
+```xml
+<!-- base/java-service/pom.xml.tmpl -->
+<groupId>com.example</groupId>
+<artifactId>{{ repo }}</artifactId>
+<version>{{ values.version | default("0.1.0") }}</version>
+```
+
+With `values: {version: "1.2.3"}` in the manifest of the `user-service` overlay, this renders as:
+
+```xml
+<groupId>com.example</groupId>
+<artifactId>user-service</artifactId>
+<version>1.2.3</version>
+```
+
+Jinja2 control structures and filters such as `{% if %}` can also be used. Lines containing only a block tag do not leave a blank line behind in the output (`trim_blocks` / `lstrip_blocks` are enabled, unlike Jinja2's defaults). Values can differ per branch — see [Per-branch overrides](configuration.md#per-branch-overrides).
+
+## Rules and error conditions
+
+- Referencing an undefined variable causes `build` to fail with an error. For values you want to be intentionally optional, provide a fallback with the `default` filter: `{{ values.version | default("0.1.0") }}`
+- Having both `pom.xml` and `pom.xml.tmpl` at the same relative path results in an error, even when they come from different profiles — use one or the other
+- `.tmpl` files must be UTF-8 text; giving the `.tmpl` extension to a file that cannot be decoded as UTF-8 (such as a binary) results in an error
+- [`.ghfanoutignore`](configuration.md#ghfanoutignore) patterns match the source name **before** the extension is stripped — to exclude `pom.xml.tmpl`, write `pom.xml.tmpl` (or `*.tmpl`), not `pom.xml`
+- Rendering is performed by both `build` and `deploy`, and trailing newlines are preserved, so no unnecessary diff appears at the destination

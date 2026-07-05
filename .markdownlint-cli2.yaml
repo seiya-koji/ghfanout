@@ -1,0 +1,7 @@
+config:
+  # Prose is not hard-wrapped; the site renderer handles line wrapping
+  MD013: false
+
+  # Python-Markdown (MkDocs) requires 4-space indentation for nested lists
+  MD007:
+    indent: 4

@@ -1,0 +1,114 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d31148d669074a8d0a63714ba94f3201e7020bc3 # v8.3.0
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Lint with ruff
+        run: uv run ruff check
+
+      - name: Type-check with mypy
+        run: uv run mypy
+
+      - name: Scan for secrets with detect-secrets
+        run: git ls-files -z | xargs -0 uv run detect-secrets-hook --baseline .secrets.baseline
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version:
+          - "3.11"
+          - "3.12"
+          - "3.13"
+          - "3.14"
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv and set the Python version
+        uses: astral-sh/setup-uv@d31148d669074a8d0a63714ba94f3201e7020bc3 # v8.3.0
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Run tests
+        run: |
+          mkdir coverage
+          uv run coverage run -m pytest
+        env:
+          COVERAGE_FILE: coverage/.coverage.py${{ matrix.python-version }}
+
+      - name: Upload coverage data
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-py${{ matrix.python-version }}
+          path: coverage
+          # .coverage.* are dotfiles, excluded by default since upload-artifact v4.4
+          include-hidden-files: true
+
+  coverage-combine:
+    needs: [test]
+    runs-on: ubuntu-latest
+    env:
+      # Also referenced in the upload step's `if` (the secrets context is
+      # unavailable there); empty until the repository secret is configured
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d31148d669074a8d0a63714ba94f3201e7020bc3 # v8.3.0
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Download coverage data
+        uses: actions/download-artifact@v8
+        with:
+          pattern: coverage-*
+          path: coverage
+          merge-multiple: true
+
+      - name: Combine coverage data and enforce 100%
+        run: |
+          uv run coverage combine coverage
+          uv run coverage report
+          uv run coverage xml
+
+      - name: Upload coverage to Codecov
+        if: env.CODECOV_TOKEN != ''
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        with:
+          files: coverage.xml
+          disable_search: true
+          fail_ci_if_error: true
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d31148d669074a8d0a63714ba94f3201e7020bc3 # v8.3.0
+
+      - name: Install dependencies
+        run: uv sync --locked --group docs
+
+      - name: Build docs (strict)
+        run: uv run mkdocs build --strict
