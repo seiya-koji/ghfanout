@@ -1,6 +1,6 @@
 # ghfanout
 
-ghfanout is a CLI tool that manages shared configuration files (such as `.gitignore` and `pom.xml`) in one place and fans them out to many GitHub repositories as pull requests (or direct pushes).
+ghfanout is **Configuration-as-Code for many GitHub repositories**: a CLI tool that manages shared configuration files (such as `.gitignore`, `pom.xml`, `pyproject.toml`, and `package.json`) in one place — a single source of truth — and fans them out as pull requests (or direct pushes).
 
 Edit a file once in your config repository, run one command, and every affected repository receives a pull request with the change.
 

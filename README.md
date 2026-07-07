@@ -6,7 +6,7 @@
 [![Python versions](https://img.shields.io/pypi/pyversions/ghfanout.svg)](https://pypi.org/project/ghfanout/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/seiya-koji/ghfanout/blob/main/LICENSE)
 
-Manage shared configuration files (`.gitignore`, `pom.xml`, …) in one place, and fan them out to many GitHub repositories as pull requests (or direct pushes). Edit a file once, run one command, and every affected repository gets a PR.
+**Configuration-as-Code for many GitHub repositories.** Manage shared configuration files (`.gitignore`, `pom.xml`, `pyproject.toml`, `package.json`, …) in one place — a single source of truth — and fan them out as pull requests (or direct pushes). Edit a file once, run one command, and every affected repository gets a PR.
 
 - **No `git clone` of target repositories** — everything goes through the GitHub Git Data API, so it works with nothing more than `pip install`
 - **Kustomize-like base + overlay composition**, with Jinja2 templating for per-repository values
@@ -46,6 +46,10 @@ base/
     .gitignore
   java-service/              # a profile: distributed only to repos that opt in
     pom.xml.tmpl             # .tmpl = Jinja2 template, rendered per repository
+  python-service/
+    pyproject.toml
+  node-service/
+    package.json
 overlays/
   user-service/              # directory name = target repository name
     manifest.yaml            # which profiles / branches this repo receives

@@ -1,7 +1,7 @@
 [project]
 name = "ghfanout"
 version = "0.1.0"
-description = "A CLI that distributes shared config files to multiple GitHub repositories as pull requests, using a Kustomize-like base/overlay structure"
+description = "Configuration-as-Code for many GitHub repositories: manage shared config files in one place and fan them out as pull requests, using a Kustomize-like base/overlay structure"
 readme = "README.md"
 authors = [
     { name = "Seiya Kojima" }
