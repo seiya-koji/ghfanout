@@ -27,7 +27,7 @@ base/
   common/                    # Common to all repositories, distributed unconditionally
     .gitignore
   java-service/              # A profile (distributed only when selected by an overlay)
-    pom.xml.tmpl             # .tmpl is a template. Variables are expanded and distributed as pom.xml
+    pom.xml.jinja            # .jinja is a template. Variables are expanded and distributed as pom.xml
   python-service/
     pyproject.toml
   node-service/
@@ -83,7 +83,7 @@ docs/
 
 - Syntax is `.gitignore` compatible (including `!` negation, `**`, and trailing-slash directory matches). One difference from git itself: `!` can re-include a file whose parent directory is excluded, so the `docs/` + `!docs/keep.md` example above works
 - Each pattern is matched against a file's path **relative to its profile directory** — e.g. `base/java-service/docs/README.md` is matched as `docs/README.md`, so one rule applies across `common/` and every profile
-- Matching happens on the **source name, before the `.tmpl` suffix is stripped**. To exclude `pom.xml.tmpl`, write `pom.xml.tmpl` (or `*.tmpl`), not `pom.xml`
+- Matching happens on the **source name, before the `.jinja` suffix is stripped**. To exclude `pom.xml.jinja`, write `pom.xml.jinja` (or `*.jinja`), not `pom.xml`
 - Only the single file at the config repository root is read; a `.ghfanoutignore` placed inside a profile has no effect (it is treated like any other file and distributed)
 
 ## manifest.yaml
@@ -97,7 +97,7 @@ branches:              # Destination branches. Defaults to the target repository
   - main
   - release-1.x
 deploy_mode: push      # Override the deployment method for only this repository (defaults to ghfanout.yaml's value)
-values:                # Values referenced from templates (*.tmpl) (optional, can be nested)
+values:                # Values referenced from templates (*.jinja) (optional, can be nested)
   version: "1.2.3"
 ```
 

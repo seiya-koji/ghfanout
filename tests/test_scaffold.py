@@ -18,7 +18,7 @@ class TestInitConfigRepo:
         assert rels == [
             ".ghfanoutignore",
             "base/common/.gitignore",
-            "base/java-service/pom.xml.tmpl",
+            "base/java-service/pom.xml.jinja",
             "ghfanout.yaml",
             "overlays/example-service/manifest.yaml",
         ]
@@ -50,14 +50,14 @@ class TestInitConfigRepo:
             init_config_repo(tmp_path)
 
     def test_skips_existing_individual_file_without_overwriting(self, tmp_path: Path) -> None:
-        # ghfanout.yaml does not exist yet, but pre-create pom.xml.tmpl only
-        pom = tmp_path / "base" / "java-service" / "pom.xml.tmpl"
+        # ghfanout.yaml does not exist yet, but pre-create pom.xml.jinja only
+        pom = tmp_path / "base" / "java-service" / "pom.xml.jinja"
         pom.parent.mkdir(parents=True)
         pom.write_bytes(b"<existing/>\n")
 
         created = init_config_repo(tmp_path)
 
-        # The existing pom.xml.tmpl is excluded from the generated list, and its content is kept
+        # The existing pom.xml.jinja is excluded from the generated list, and its content is kept
         assert pom not in created
         assert pom.read_bytes() == b"<existing/>\n"
         # Other files are generated as usual

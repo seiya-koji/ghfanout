@@ -52,7 +52,7 @@ _GHFANOUTIGNORE = """\
 # .ghfanoutignore — files under base/ that ghfanout must NOT distribute.
 # Same syntax as .gitignore ('#' starts a comment only at the start of a line).
 # Each pattern is matched against a file's path within its profile (before any
-# .tmpl suffix is stripped), so a profile can keep its own README or helper
+# .jinja suffix is stripped), so a profile can keep its own README or helper
 # files without shipping them. Example patterns — a README.md at any depth,
 # all markdown files, everything under docs/ except docs/keep.md:
 #
@@ -62,9 +62,9 @@ _GHFANOUTIGNORE = """\
 # !docs/keep.md
 """
 
-_POM_XML_TMPL = """\
+_POM_XML_TEMPLATE = """\
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Sample pom.xml template for ghfanout. Only files with the .tmpl extension get variable
+<!-- Sample pom.xml template for ghfanout. Only files with the .jinja extension get variable
      expansion, and are distributed under the name with that extension stripped (pom.xml).
      artifactId is filled with the destination repository name, and version is filled with
      manifest.yaml's values.version (0.1.0 if unspecified) -->
@@ -93,7 +93,7 @@ bases:
 #       version: "0.9.9"
 # Specify this to change the deployment method for only this repo (default: ghfanout.yaml's value)
 # deploy_mode: push
-# Values referenced from templates (files with the .tmpl extension). The built-in variables
+# Values referenced from templates (files with the .jinja extension). The built-in variables
 # repo (repository name) and org are available even without defining values
 # values:
 #   version: "1.2.3"
@@ -106,7 +106,7 @@ def _template_files(org: str) -> dict[str, bytes]:
         ROOT_CONFIG_FILENAME: _ROOT_CONFIG_TEMPLATE.replace("__ORG__", org).encode("utf-8"),
         IGNORE_FILENAME: _GHFANOUTIGNORE.encode("utf-8"),
         f"{BASE_DIR_NAME}/{COMMON_PROFILE}/.gitignore": _GITIGNORE.encode("utf-8"),
-        f"{BASE_DIR_NAME}/{EXAMPLE_PROFILE}/pom.xml.tmpl": _POM_XML_TMPL.encode("utf-8"),
+        f"{BASE_DIR_NAME}/{EXAMPLE_PROFILE}/pom.xml.jinja": _POM_XML_TEMPLATE.encode("utf-8"),
         f"{OVERLAYS_DIR_NAME}/{EXAMPLE_OVERLAY}/{MANIFEST_FILENAME}": _MANIFEST.encode("utf-8"),
     }
 

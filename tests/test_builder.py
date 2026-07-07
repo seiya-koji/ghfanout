@@ -124,12 +124,12 @@ class TestGhfanoutIgnore:
         assert "docs/internal.md" not in result.files
         assert result.files["docs/keep.md"] == b"keep\n"
 
-    def test_tmpl_files_match_by_pre_strip_name(self, config_repo: Path) -> None:
+    def test_jinja_files_match_by_pre_strip_name(self, config_repo: Path) -> None:
         # Exclusion happens before rendering: a template that would fail to
         # render (undefined variable) is skipped without raising
         java_dir = config_repo / "base" / "java-service"
-        (java_dir / "notes.txt.tmpl").write_text("{{ values.missing }}\n", encoding="utf-8")
-        (config_repo / ".ghfanoutignore").write_text("notes.txt.tmpl\n", encoding="utf-8")
+        (java_dir / "notes.txt.jinja").write_text("{{ values.missing }}\n", encoding="utf-8")
+        (config_repo / ".ghfanoutignore").write_text("notes.txt.jinja\n", encoding="utf-8")
 
         result = build_overlay_files(
             config_repo, Manifest(bases=("java-service",)), repo="user-service", org="myorg"
@@ -137,9 +137,9 @@ class TestGhfanoutIgnore:
 
         assert "notes.txt" not in result.files
 
-    def test_post_strip_name_does_not_exclude_tmpl_file(self, config_repo: Path) -> None:
+    def test_post_strip_name_does_not_exclude_jinja_file(self, config_repo: Path) -> None:
         java_dir = config_repo / "base" / "java-service"
-        (java_dir / "notes.txt.tmpl").write_text("{{ repo }}\n", encoding="utf-8")
+        (java_dir / "notes.txt.jinja").write_text("{{ repo }}\n", encoding="utf-8")
         (config_repo / ".ghfanoutignore").write_text("notes.txt\n", encoding="utf-8")
 
         result = build_overlay_files(
@@ -163,10 +163,10 @@ class TestGhfanoutIgnore:
 
 
 class TestTemplateRendering:
-    def test_tmpl_is_rendered_and_distributed_without_extension(self, config_repo: Path) -> None:
+    def test_jinja_is_rendered_and_distributed_without_extension(self, config_repo: Path) -> None:
         java_dir = config_repo / "base" / "java-service"
         (java_dir / "pom.xml").unlink()
-        (java_dir / "pom.xml.tmpl").write_text(
+        (java_dir / "pom.xml.jinja").write_text(
             "<artifactId>{{ repo }}</artifactId>\n"
             "<groupId>com.{{ org }}</groupId>\n"
             "<version>{{ values.version }}</version>\n",
@@ -176,7 +176,7 @@ class TestTemplateRendering:
 
         result = build_overlay_files(config_repo, manifest, repo="user-service", org="myorg")
 
-        assert "pom.xml.tmpl" not in result.files
+        assert "pom.xml.jinja" not in result.files
         # Also verify that the trailing newline is preserved (keep_trailing_newline)
         assert result.files["pom.xml"] == (
             b"<artifactId>user-service</artifactId>\n"
@@ -184,7 +184,7 @@ class TestTemplateRendering:
             b"<version>1.2.3</version>\n"
         )
 
-    def test_non_tmpl_template_like_syntax_is_copied_as_is(self, config_repo: Path) -> None:
+    def test_non_jinja_template_like_syntax_is_copied_as_is(self, config_repo: Path) -> None:
         # Not rendered even though it contains GitHub Actions' ${{ }} or Jinja-like {{ }} syntax
         raw = b"run: echo ${{ secrets.TOKEN }} {{ not_a_template }}\n"
         (config_repo / "base" / "common" / "ci.yml").write_bytes(raw)
@@ -195,7 +195,7 @@ class TestTemplateRendering:
 
     def test_default_filter_provides_fallback_for_undefined_values(self, config_repo: Path) -> None:
         java_dir = config_repo / "base" / "java-service"
-        (java_dir / "version.txt.tmpl").write_text(
+        (java_dir / "version.txt.jinja").write_text(
             '{{ values.version | default("0.1.0") }}\n', encoding="utf-8"
         )
 
@@ -207,19 +207,19 @@ class TestTemplateRendering:
 
     def test_values_supports_nested_value_access(self, config_repo: Path) -> None:
         java_dir = config_repo / "base" / "java-service"
-        (java_dir / "group.txt.tmpl").write_text("{{ values.maven.groupId }}\n", encoding="utf-8")
+        (java_dir / "group.txt.jinja").write_text("{{ values.maven.groupId }}\n", encoding="utf-8")
         manifest = Manifest(bases=("java-service",), values={"maven": {"groupId": "com.example"}})
 
         result = build_overlay_files(config_repo, manifest, repo="user-service", org="myorg")
 
         assert result.files["group.txt"] == b"com.example\n"
 
-    def test_tmpl_files_are_overridden_last_wins_too(self, config_repo: Path) -> None:
+    def test_jinja_files_are_overridden_last_wins_too(self, config_repo: Path) -> None:
         java_dir = config_repo / "base" / "java-service"
-        (java_dir / "app.conf.tmpl").write_text("java {{ repo }}\n", encoding="utf-8")
+        (java_dir / "app.conf.jinja").write_text("java {{ repo }}\n", encoding="utf-8")
         legacy_dir = config_repo / "base" / "java-legacy"
         legacy_dir.mkdir()
-        (legacy_dir / "app.conf.tmpl").write_text("legacy {{ repo }}\n", encoding="utf-8")
+        (legacy_dir / "app.conf.jinja").write_text("legacy {{ repo }}\n", encoding="utf-8")
 
         result = build_overlay_files(
             config_repo,
@@ -230,46 +230,46 @@ class TestTemplateRendering:
 
         assert result.files["app.conf"] == b"legacy user-service\n"
 
-    def test_hidden_file_named_tmpl_is_not_treated_as_template(self, config_repo: Path) -> None:
-        (config_repo / "base" / "common" / ".tmpl").write_bytes(b"{{ raw }}\n")
+    def test_hidden_file_named_jinja_is_not_treated_as_template(self, config_repo: Path) -> None:
+        (config_repo / "base" / "common" / ".jinja").write_bytes(b"{{ raw }}\n")
 
         result = build_overlay_files(config_repo, Manifest(), repo="user-service", org="myorg")
 
-        assert result.files[".tmpl"] == b"{{ raw }}\n"
+        assert result.files[".jinja"] == b"{{ raw }}\n"
 
     def test_raises_build_error_for_undefined_variable_reference(self, config_repo: Path) -> None:
         java_dir = config_repo / "base" / "java-service"
-        (java_dir / "bad.txt.tmpl").write_text("{{ values.missing }}\n", encoding="utf-8")
+        (java_dir / "bad.txt.jinja").write_text("{{ values.missing }}\n", encoding="utf-8")
 
-        with pytest.raises(BuildError, match=re.escape("bad.txt.tmpl")):
+        with pytest.raises(BuildError, match=re.escape("bad.txt.jinja")):
             build_overlay_files(
                 config_repo, Manifest(bases=("java-service",)), repo="user-service", org="myorg"
             )
 
     def test_raises_build_error_for_template_syntax_error(self, config_repo: Path) -> None:
         java_dir = config_repo / "base" / "java-service"
-        (java_dir / "broken.txt.tmpl").write_text("{% if %}\n", encoding="utf-8")
+        (java_dir / "broken.txt.jinja").write_text("{% if %}\n", encoding="utf-8")
 
-        with pytest.raises(BuildError, match=re.escape("broken.txt.tmpl")):
+        with pytest.raises(BuildError, match=re.escape("broken.txt.jinja")):
             build_overlay_files(
                 config_repo, Manifest(bases=("java-service",)), repo="user-service", org="myorg"
             )
 
-    def test_raises_build_error_when_tmpl_and_non_tmpl_coexist(self, config_repo: Path) -> None:
-        # Add pom.xml.tmpl where java-service already has pom.xml
+    def test_raises_build_error_when_jinja_and_non_jinja_coexist(self, config_repo: Path) -> None:
+        # Add pom.xml.jinja where java-service already has pom.xml
         java_dir = config_repo / "base" / "java-service"
-        (java_dir / "pom.xml.tmpl").write_text("<x/>\n", encoding="utf-8")
+        (java_dir / "pom.xml.jinja").write_text("<x/>\n", encoding="utf-8")
 
         with pytest.raises(BuildError, match=re.escape("pom.xml")):
             build_overlay_files(
                 config_repo, Manifest(bases=("java-service",)), repo="user-service", org="myorg"
             )
 
-    def test_raises_build_error_for_non_utf8_tmpl(self, config_repo: Path) -> None:
+    def test_raises_build_error_for_non_utf8_jinja(self, config_repo: Path) -> None:
         java_dir = config_repo / "base" / "java-service"
-        (java_dir / "binary.dat.tmpl").write_bytes(b"\xff\xfe\x00\x01")
+        (java_dir / "binary.dat.jinja").write_bytes(b"\xff\xfe\x00\x01")
 
-        with pytest.raises(BuildError, match=re.escape("binary.dat.tmpl")):
+        with pytest.raises(BuildError, match=re.escape("binary.dat.jinja")):
             build_overlay_files(
                 config_repo, Manifest(bases=("java-service",)), repo="user-service", org="myorg"
             )
@@ -328,7 +328,7 @@ class TestBuildPerVariant:
     def test_builds_only_unique_variants(self, config_repo: Path) -> None:
         java_dir = config_repo / "base" / "java-service"
         (java_dir / "pom.xml").unlink()
-        (java_dir / "pom.xml.tmpl").write_text(
+        (java_dir / "pom.xml.jinja").write_text(
             "<version>{{ values.version }}</version>\n", encoding="utf-8"
         )
         manifest = Manifest(
