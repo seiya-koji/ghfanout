@@ -30,8 +30,8 @@ class TestInitCommand:
 
         assert build_result.exit_code == 0, build_result.output
         assert (out_dir / ".gitignore").is_file()
-        # pom.xml.tmpl is rendered, and the built-in repo variable expands to the overlay name
-        assert not (out_dir / "pom.xml.tmpl").exists()
+        # pom.xml.jinja is rendered, and the built-in repo variable expands to the overlay name
+        assert not (out_dir / "pom.xml.jinja").exists()
         pom = (out_dir / "pom.xml").read_text(encoding="utf-8")
         assert "<artifactId>example-service</artifactId>" in pom
         assert "<version>0.1.0</version>" in pom
@@ -144,7 +144,7 @@ class TestBuildCommand:
     ) -> None:
         java_dir = config_repo / "base" / "java-service"
         (java_dir / "pom.xml").unlink()
-        (java_dir / "pom.xml.tmpl").write_text(
+        (java_dir / "pom.xml.jinja").write_text(
             "<version>{{ values.version }}</version>\n", encoding="utf-8"
         )
         overlay_dir = config_repo / "overlays" / "user-service"

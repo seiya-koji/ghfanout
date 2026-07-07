@@ -20,7 +20,7 @@ ghfanout init                          # Generate into the current directory
 ghfanout init ./config --org myorg     # Specify the target directory and org
 ```
 
-- Generates `ghfanout.yaml`, `.ghfanoutignore`, `base/common/.gitignore`, `base/java-service/pom.xml.tmpl`, and `overlays/example-service/manifest.yaml` — you can try a build right after generating
+- Generates `ghfanout.yaml`, `.ghfanoutignore`, `base/common/.gitignore`, `base/java-service/pom.xml.jinja`, and `overlays/example-service/manifest.yaml` — you can try a build right after generating
 - Fails if `ghfanout.yaml` already exists in the target directory; individual scaffold files that already exist are skipped without being overwritten
 
 ## build
@@ -40,7 +40,7 @@ Behavior:
 - Files matched by the config repository's `.ghfanoutignore` are excluded from the output — see [Configuration](configuration.md#ghfanoutignore)
 - Running `build` with the overlay omitted builds all repositories under `overlays/`. Like `deploy --all`, it does not stop on a single failure — it tries all of them before exiting non-zero
 - Building an overlay that has a per-branch `bases` or `values` override writes output per branch to `<output>/<branch name>/` (without an override, a single set is written directly under `<output>/`)
-- Template (`*.tmpl`) rendering errors, such as referencing an undefined variable, cause the build to fail ([Templates](templates.md))
+- Template (`*.jinja`) rendering errors, such as referencing an undefined variable, cause the build to fail ([Templates](templates.md))
 
 ## deploy
 

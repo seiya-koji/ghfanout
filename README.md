@@ -45,7 +45,7 @@ base/
   common/                    # distributed to every repository
     .gitignore
   java-service/              # a profile: distributed only to repos that opt in
-    pom.xml.tmpl             # .tmpl = Jinja2 template, rendered per repository
+    pom.xml.jinja            # .jinja = Jinja2 template, rendered per repository
   python-service/
     pyproject.toml
   node-service/

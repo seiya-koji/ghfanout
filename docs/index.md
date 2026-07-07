@@ -16,7 +16,7 @@ New to ghfanout? Follow the [Getting Started](getting-started.md) tutorial — i
 | --- | --- |
 | [Getting Started](getting-started.md) | Install → `init` → `build` → authenticate → `deploy`, end to end |
 | [Configuration](configuration.md) | The config repository layout, `ghfanout.yaml`, `manifest.yaml`, per-branch overrides, and distribution excludes (`.ghfanoutignore`) |
-| [Templates](templates.md) | Embedding repository-specific values with `.tmpl` files (Jinja2) |
+| [Templates](templates.md) | Embedding repository-specific values with `.jinja` files (Jinja2) |
 | [Authentication](authentication.md) | PAT and GitHub App authentication in detail |
 | [CLI Reference](cli.md) | All commands, options, and behavior details |
 | [Development](development.md) | Local setup, running tests/lint/type-check, and commit conventions |

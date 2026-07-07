@@ -21,7 +21,7 @@ COMMON_PROFILE = "common"
 # Only files with this suffix are subject to variable expansion; the suffix is
 # stripped when distributed. Because this is opt-in, ordinary files containing
 # GitHub Actions' ${{ }} syntax etc. are distributed unmodified.
-TEMPLATE_SUFFIX = ".tmpl"
+TEMPLATE_SUFFIX = ".jinja"
 
 # keep_trailing_newline: preserve the trailing newline (dropped by default,
 # which would produce needless diffs at the distribution destination).
@@ -53,7 +53,7 @@ class BuildResult:
 def _render_template(
     rel_path: str, content: bytes, *, repo: str, org: str, values: dict[str, object]
 ) -> bytes:
-    """Render a single *.tmpl file. Failures are converted into BuildError."""
+    """Render a single *.jinja file. Failures are converted into BuildError."""
     try:
         source = content.decode("utf-8")
     except UnicodeDecodeError as exc:
@@ -75,11 +75,11 @@ def _render_template(
 def _render_templates(
     files: dict[str, bytes], *, repo: str, org: str, values: dict[str, object]
 ) -> dict[str, bytes]:
-    """Render *.tmpl files in the build result and replace them with the extension-stripped name."""
+    """Render *.jinja files and replace them with the extension-stripped name."""
     result: dict[str, bytes] = {}
     for rel_path, content in files.items():
         target = rel_path[: -len(TEMPLATE_SUFFIX)]
-        # If the filename is exactly ".tmpl", treat it as a hidden file, not a template.
+        # If the filename is exactly ".jinja", treat it as a hidden file, not a template.
         if not rel_path.endswith(TEMPLATE_SUFFIX) or not target or target.endswith("/"):
             result[rel_path] = content
             continue
@@ -94,7 +94,7 @@ def _load_ignore_spec(config_root: Path) -> GitIgnoreSpec:
 
     Returns an empty spec (matching nothing) when the file is absent. Patterns
     use .gitignore syntax and are matched against each file's path relative to
-    its profile directory (i.e. the distribution path, before the .tmpl suffix
+    its profile directory (i.e. the distribution path, before the .jinja suffix
     is stripped).
     """
     ignore_path = config_root / IGNORE_FILENAME
@@ -113,7 +113,7 @@ def build_overlay_files(
     in bases: (the same relative path is fully overwritten by the later one,
     and an info log records the override). Files matched by the config
     repository's .ghfanoutignore are excluded before composition. After
-    composition, *.tmpl files are rendered and lose their extension.
+    composition, *.jinja files are rendered and lose their extension.
 
     Args:
         config_root: Config repository root.

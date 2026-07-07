@@ -113,7 +113,7 @@ class Manifest:
             repository's default branch".
         deploy_mode: Per-repository override of ghfanout.yaml's deploy_mode;
             None inherits it.
-        values: Values (optionally nested) referenced from templates (*.tmpl)
+        values: Values (optionally nested) referenced from templates (*.jinja)
             via {{ values.xxx }}.
     """
 

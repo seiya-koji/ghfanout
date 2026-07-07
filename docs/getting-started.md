@@ -46,7 +46,7 @@ base/
   common/                      # files distributed to every repository
     .gitignore
   java-service/                # a "profile": distributed only to repos that opt in
-    pom.xml.tmpl               # .tmpl files are Jinja2 templates
+    pom.xml.jinja              # .jinja files are Jinja2 templates
 overlays/
   example-service/             # one directory per target repository
     manifest.yaml              # which profiles / branches this repo receives
@@ -71,7 +71,7 @@ example-service: wrote 2 file(s) to /path/to/my-config/dist/example-service
 Look inside `dist/example-service/`:
 
 - `.gitignore` — copied as-is from `base/common/`
-- `pom.xml` — rendered from `base/java-service/pom.xml.tmpl`, with `{{ repo }}` replaced by the repository name (see [Templates](templates.md))
+- `pom.xml` — rendered from `base/java-service/pom.xml.jinja`, with `{{ repo }}` replaced by the repository name (see [Templates](templates.md))
 
 ## 4. Set up authentication
 

@@ -246,7 +246,7 @@ class TestDeployOverlayApiCalls:
         # result changes
         java_dir = config_repo / "base" / "java-service"
         (java_dir / "pom.xml").unlink()
-        (java_dir / "pom.xml.tmpl").write_text(
+        (java_dir / "pom.xml.jinja").write_text(
             "<version>{{ values.version }}</version>\n", encoding="utf-8"
         )
         overlay_dir = config_repo / "overlays" / "user-service"
