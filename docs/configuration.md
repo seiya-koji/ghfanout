@@ -28,6 +28,8 @@ base/
     .gitignore
   java-service/              # A profile (distributed only when selected by an overlay)
     pom.xml.tmpl             # .tmpl is a template. Variables are expanded and distributed as pom.xml
+  python-service/
+    pyproject.toml
   node-service/
     package.json
 
