@@ -37,7 +37,7 @@ ghfanout build -o /tmp/x               # Output all repositories to /tmp/x/<over
 
 Behavior:
 
-- The output only overwrites files; it does not delete unrelated files remaining in the output destination
+- The output directory is wiped before each build, so files removed from your base profiles are not left behind
 - Files matched by the config repository's `.ghfanoutignore` are excluded from the output — see [Configuration](configuration.md#ghfanoutignore)
 - Running `build` with the overlay omitted builds all repositories under `overlays/`. Like `deploy --all`, it does not stop on a single failure — it tries all of them before exiting non-zero
 - Building an overlay that has a per-branch `bases` or `values` override writes output per branch to `<output>/<branch name>/` (without an override, a single set is written directly under `<output>/`)

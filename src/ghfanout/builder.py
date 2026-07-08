@@ -211,8 +211,8 @@ def build_per_variant(
 def write_build_output(result: BuildResult, output_dir: Path) -> list[Path]:
     """Write the build result to a local directory.
 
-    Existing files are overwritten, but unrelated files left in the output
-    directory are not deleted.
+    The output directory is expected to be empty (or not yet exist); existing
+    files are overwritten but unrelated files are not deleted.
 
     Returns:
         The written file paths, sorted by relative path.

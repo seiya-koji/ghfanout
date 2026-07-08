@@ -200,6 +200,20 @@ class TestBuildCommand:
         assert (output_dir / "pom.xml").is_file()
         assert not (output_dir / "main").exists()
 
+    def test_removes_stale_files_from_output_directory(
+        self, config_repo: Path, tmp_path: Path
+    ) -> None:
+        output_dir = tmp_path / "out"
+        output_dir.mkdir()
+        (output_dir / "stale.txt").write_bytes(b"old\n")
+
+        result = runner.invoke(
+            app, ["-C", str(config_repo), "build", "user-service", "-o", str(output_dir)]
+        )
+
+        assert result.exit_code == 0, result.output
+        assert not (output_dir / "stale.txt").exists()
+
     def test_builds_all_overlays_when_overlay_omitted(self, config_repo: Path) -> None:
         api_dir = config_repo / "overlays" / "api-gateway"
         api_dir.mkdir()
