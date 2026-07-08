@@ -93,46 +93,82 @@ def _render_templates(
     return result
 
 
+def _resolve_remap(rel_path: str, paths: dict[str, str]) -> tuple[str, str] | None:
+    """Resolve the paths: entry matching rel_path.
+
+    An exact file entry wins over directory entries (sources ending in "/");
+    among directory entries the longest (most specific) prefix wins. File
+    paths never end in "/", so an exact lookup cannot hit a directory entry.
+
+    Returns:
+        (new path, matched source), or None when no entry matches.
+    """
+    dest = paths.get(rel_path)
+    if dest is not None:
+        return dest, rel_path
+    best: str | None = None
+    for source in paths:
+        if not source.endswith("/") or not rel_path.startswith(source):
+            continue
+        if best is None or len(source) > len(best):
+            best = source
+    if best is None:
+        return None
+    return paths[best] + rel_path[len(best) :], best
+
+
 def _apply_path_remaps(
     files: dict[str, bytes], paths: dict[str, str]
 ) -> tuple[dict[str, bytes], frozenset[str]]:
     """Apply the manifest's paths: remaps to the rendered file set.
 
-    Sources match the distribution path (after the .jinja suffix is stripped);
-    the result of a remap is never remapped again. Swaps (a -> b, b -> a) and
-    chains (a -> b, b -> c) are fine because the collision check ignores files
-    that are themselves remapped away.
+    Sources match the distribution path (after the .jinja suffix is stripped):
+    a plain source matches exactly one file, and a source ending in "/"
+    matches every file under that directory, moving it to the destination
+    directory with its structure preserved. Each file is moved at most once —
+    matching is against the original path, never against the result of
+    another remap — so swaps (a -> b, b -> a) and chains (a -> b, b -> c) are
+    fine, for directories as well as files.
 
     Returns:
         The remapped files, and the sources that matched no file (judged
         across variants by build_per_variant, not an error here).
 
     Raises:
-        BuildError: If two sources map to the same destination, or a
-            destination collides with a file that is not remapped.
+        BuildError: If two files would end up at the same distribution path.
     """
     if not paths:
         return files, frozenset()
-    remap_origins: dict[str, str] = {}
-    result: dict[str, bytes] = {}
-    for rel_path, content in files.items():
-        dest = paths.get(rel_path)
-        if dest is None:
-            result[rel_path] = content
+    matched_sources: set[str] = set()
+    matched_files: set[str] = set()
+    new_paths: dict[str, str] = {}
+    for rel_path in files:
+        resolved = _resolve_remap(rel_path, paths)
+        if resolved is None:
+            new_paths[rel_path] = rel_path
             continue
-        if dest in remap_origins:
+        new_path, source = resolved
+        new_paths[rel_path] = new_path
+        matched_sources.add(source)
+        matched_files.add(rel_path)
+
+    origins: dict[str, str] = {}
+    result: dict[str, bytes] = {}
+    for rel_path, new_path in new_paths.items():
+        other = origins.get(new_path)
+        if other is not None:
+            if other in matched_files and rel_path in matched_files:
+                raise BuildError(
+                    f"manifest.yaml paths: '{other}' and '{rel_path}' both map to '{new_path}'."
+                )
+            remapped = rel_path if rel_path in matched_files else other
             raise BuildError(
-                f"manifest.yaml paths: '{remap_origins[dest]}' and '{rel_path}' both map"
-                f" to '{dest}'."
+                f"manifest.yaml paths: destination '{new_path}' for '{remapped}' collides"
+                " with a file that is not remapped."
             )
-        if dest in files and dest not in paths:
-            raise BuildError(
-                f"manifest.yaml paths: destination '{dest}' for '{rel_path}' collides with"
-                " a file that is not remapped."
-            )
-        remap_origins[dest] = rel_path
-        result[dest] = content
-    return result, frozenset(source for source in paths if source not in files)
+        origins[new_path] = rel_path
+        result[new_path] = files[rel_path]
+    return result, frozenset(paths) - matched_sources
 
 
 def _load_ignore_spec(config_root: Path) -> GitIgnoreSpec:

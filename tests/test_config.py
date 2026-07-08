@@ -616,15 +616,15 @@ class TestLoadManifest:
         with pytest.raises(ConfigError, match="relative POSIX path"):
             load_manifest(config_repo, "user-service")
 
-    def test_raises_config_error_for_trailing_slash_in_paths_destination(
+    def test_raises_config_error_for_file_source_with_directory_destination(
         self, config_repo: Path
     ) -> None:
-        # A trailing slash produces an empty segment, so the same check catches it
+        # "pom.xml: dir/" mixes a file source with a directory destination
         overlay_dir = config_repo / "overlays" / "user-service"
         (overlay_dir / "manifest.yaml").write_text(
             "bases:\n  - java-service\npaths:\n  pom.xml: dir/\n", encoding="utf-8"
         )
-        with pytest.raises(ConfigError, match="relative POSIX path"):
+        with pytest.raises(ConfigError, match="file to a file"):
             load_manifest(config_repo, "user-service")
 
     def test_raises_config_error_for_backslash_in_paths_destination(
@@ -642,6 +642,66 @@ class TestLoadManifest:
         overlay_dir = config_repo / "overlays" / "user-service"
         (overlay_dir / "manifest.yaml").write_text(
             'bases:\n  - java-service\npaths:\n  pom.xml: ""\n', encoding="utf-8"
+        )
+        with pytest.raises(ConfigError, match="relative POSIX path"):
+            load_manifest(config_repo, "user-service")
+
+    def test_loads_directory_paths_entry(self, config_repo: Path) -> None:
+        # Source and destination both ending in "/" form a directory entry
+        overlay_dir = config_repo / "overlays" / "user-service"
+        (overlay_dir / "manifest.yaml").write_text(
+            "bases:\n  - java-service\npaths:\n  workflows/: .github/workflows/\n",
+            encoding="utf-8",
+        )
+        manifest = load_manifest(config_repo, "user-service")
+        assert manifest.paths == {"workflows/": ".github/workflows/"}
+
+    def test_branch_paths_can_remove_directory_entry(self, config_repo: Path) -> None:
+        overlay_dir = config_repo / "overlays" / "user-service"
+        (overlay_dir / "manifest.yaml").write_text(
+            "bases:\n  - java-service\n"
+            "paths:\n  workflows/: .github/workflows/\n"
+            "branches:\n  - main\n  - name: release-1.x\n    paths:\n      workflows/: null\n",
+            encoding="utf-8",
+        )
+        manifest = load_manifest(config_repo, "user-service")
+        assert manifest.branches[1] == BranchSpec(name="release-1.x", paths={"workflows/": None})
+        assert manifest.paths_for(manifest.branches[1]) == {}
+
+    def test_raises_config_error_for_directory_source_with_file_destination(
+        self, config_repo: Path
+    ) -> None:
+        overlay_dir = config_repo / "overlays" / "user-service"
+        (overlay_dir / "manifest.yaml").write_text(
+            "bases:\n  - java-service\npaths:\n  workflows/: ci.yml\n", encoding="utf-8"
+        )
+        with pytest.raises(ConfigError, match="directory to a"):
+            load_manifest(config_repo, "user-service")
+
+    def test_raises_config_error_for_bare_slash_paths_source(self, config_repo: Path) -> None:
+        # "/" would match every file; its core is a single empty segment
+        overlay_dir = config_repo / "overlays" / "user-service"
+        (overlay_dir / "manifest.yaml").write_text(
+            "bases:\n  - java-service\npaths:\n  /: dest/\n", encoding="utf-8"
+        )
+        with pytest.raises(ConfigError, match="relative POSIX path"):
+            load_manifest(config_repo, "user-service")
+
+    def test_raises_config_error_for_parent_segment_in_directory_destination(
+        self, config_repo: Path
+    ) -> None:
+        overlay_dir = config_repo / "overlays" / "user-service"
+        (overlay_dir / "manifest.yaml").write_text(
+            "bases:\n  - java-service\npaths:\n  workflows/: ../elsewhere/\n", encoding="utf-8"
+        )
+        with pytest.raises(ConfigError, match="relative POSIX path"):
+            load_manifest(config_repo, "user-service")
+
+    def test_raises_config_error_for_invalid_paths_source(self, config_repo: Path) -> None:
+        # Sources are validated with the same path rules as destinations
+        overlay_dir = config_repo / "overlays" / "user-service"
+        (overlay_dir / "manifest.yaml").write_text(
+            "bases:\n  - java-service\npaths:\n  ../escape.txt: dest.txt\n", encoding="utf-8"
         )
         with pytest.raises(ConfigError, match="relative POSIX path"):
             load_manifest(config_repo, "user-service")

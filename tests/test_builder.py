@@ -388,6 +388,102 @@ class TestPathRemapping:
         with pytest.raises(BuildError, match=re.escape("collides with a file that is not")):
             build_overlay_files(config_repo, manifest, repo="user-service", org="myorg")
 
+    def test_directory_remap_moves_all_files_under_prefix(self, config_repo: Path) -> None:
+        # A source/destination pair ending in "/" moves every file under the
+        # directory, preserving the nested structure — no per-file enumeration
+        java_dir = config_repo / "base" / "java-service"
+        (java_dir / "workflows" / "sub").mkdir(parents=True)
+        (java_dir / "workflows" / "ci.yml").write_bytes(b"ci\n")
+        (java_dir / "workflows" / "release.yml").write_bytes(b"rel\n")
+        (java_dir / "workflows" / "sub" / "deep.yml").write_bytes(b"deep\n")
+        manifest = Manifest(bases=("java-service",), paths={"workflows/": ".github/workflows/"})
+
+        result = build_overlay_files(config_repo, manifest, repo="user-service", org="myorg")
+
+        assert result.files[".github/workflows/ci.yml"] == b"ci\n"
+        assert result.files[".github/workflows/release.yml"] == b"rel\n"
+        assert result.files[".github/workflows/sub/deep.yml"] == b"deep\n"
+        assert not any(rel_path.startswith("workflows/") for rel_path in result.files)
+        assert result.unmatched_path_sources == frozenset()
+
+    def test_exact_file_entry_wins_over_directory_entry(self, config_repo: Path) -> None:
+        java_dir = config_repo / "base" / "java-service"
+        (java_dir / "workflows").mkdir()
+        (java_dir / "workflows" / "ci.yml").write_bytes(b"ci\n")
+        (java_dir / "workflows" / "special.yml").write_bytes(b"sp\n")
+        manifest = Manifest(
+            bases=("java-service",),
+            paths={
+                "workflows/": ".github/workflows/",
+                "workflows/special.yml": "docs/special.yml",
+            },
+        )
+
+        result = build_overlay_files(config_repo, manifest, repo="user-service", org="myorg")
+
+        assert result.files[".github/workflows/ci.yml"] == b"ci\n"
+        assert result.files["docs/special.yml"] == b"sp\n"
+        assert ".github/workflows/special.yml" not in result.files
+
+    def test_longest_directory_prefix_wins(self, config_repo: Path) -> None:
+        java_dir = config_repo / "base" / "java-service"
+        (java_dir / "conf" / "secure").mkdir(parents=True)
+        (java_dir / "conf" / "app.yml").write_bytes(b"app\n")
+        (java_dir / "conf" / "secure" / "keys.yml").write_bytes(b"keys\n")
+        manifest = Manifest(
+            bases=("java-service",), paths={"conf/": "etc/", "conf/secure/": "vault/"}
+        )
+
+        result = build_overlay_files(config_repo, manifest, repo="user-service", org="myorg")
+
+        assert result.files["etc/app.yml"] == b"app\n"
+        assert result.files["vault/keys.yml"] == b"keys\n"
+        assert "etc/secure/keys.yml" not in result.files
+
+    def test_directory_swap_remaps_exchange_contents(self, config_repo: Path) -> None:
+        java_dir = config_repo / "base" / "java-service"
+        (java_dir / "a").mkdir()
+        (java_dir / "a" / "f.txt").write_bytes(b"A\n")
+        (java_dir / "b").mkdir()
+        (java_dir / "b" / "f.txt").write_bytes(b"B\n")
+        manifest = Manifest(bases=("java-service",), paths={"a/": "b/", "b/": "a/"})
+
+        result = build_overlay_files(config_repo, manifest, repo="user-service", org="myorg")
+
+        assert result.files["a/f.txt"] == b"B\n"
+        assert result.files["b/f.txt"] == b"A\n"
+
+    def test_unmatched_directory_source_is_reported_not_raised(self, config_repo: Path) -> None:
+        manifest = Manifest(bases=("java-service",), paths={"no-such-dir/": "dest/"})
+
+        result = build_overlay_files(config_repo, manifest, repo="user-service", org="myorg")
+
+        assert result.unmatched_path_sources == frozenset({"no-such-dir/"})
+
+    def test_raises_build_error_when_directory_remaps_collide(self, config_repo: Path) -> None:
+        java_dir = config_repo / "base" / "java-service"
+        (java_dir / "a").mkdir()
+        (java_dir / "a" / "f.txt").write_bytes(b"A\n")
+        (java_dir / "b").mkdir()
+        (java_dir / "b" / "f.txt").write_bytes(b"B\n")
+        manifest = Manifest(bases=("java-service",), paths={"a/": "merged/", "b/": "merged/"})
+
+        with pytest.raises(BuildError, match=re.escape("both map to 'merged/f.txt'")):
+            build_overlay_files(config_repo, manifest, repo="user-service", org="myorg")
+
+    def test_raises_build_error_when_directory_remap_collides_with_unremapped_file(
+        self, config_repo: Path
+    ) -> None:
+        java_dir = config_repo / "base" / "java-service"
+        (java_dir / "wf").mkdir()
+        (java_dir / "wf" / "pom.xml").write_bytes(b"wf pom\n")
+        (java_dir / "x").mkdir()
+        (java_dir / "x" / "pom.xml").write_bytes(b"x pom\n")
+        manifest = Manifest(bases=("java-service",), paths={"wf/": "x/"})
+
+        with pytest.raises(BuildError, match=re.escape("collides with a file that is not")):
+            build_overlay_files(config_repo, manifest, repo="user-service", org="myorg")
+
 
 class TestVariantKey:
     def test_different_values_yield_different_key_even_with_same_bases(self) -> None:

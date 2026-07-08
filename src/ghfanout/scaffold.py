@@ -98,9 +98,11 @@ bases:
 # values:
 #   version: "1.2.3"
 # Remap distribution paths (source -> destination). Sources are matched against the
-# distribution path, after any .jinja suffix is stripped
+# distribution path, after any .jinja suffix is stripped. Entries ending in / on both
+# sides move every file under that directory
 # paths:
 #   pom.xml: services/user/pom.xml
+#   workflows/: .github/workflows/
 """
 
 

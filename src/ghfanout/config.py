@@ -376,12 +376,19 @@ def _parse_values(path: Path, data: dict[str, object]) -> dict[str, object]:
     return _parse_values_mapping(path, data.get("values"), "values")
 
 
-def _validate_remap_destination(path: Path, label: str, source: str, dest: str) -> None:
-    """Validate a 'paths'-like destination as a relative POSIX path."""
-    if "\\" in dest or any(segment in ("", ".", "..") for segment in dest.split("/")):
+def _validate_remap_path(path: Path, subject: str, value: str) -> None:
+    """Validate a 'paths'-like source or destination as a relative POSIX path.
+
+    A single trailing slash (marking a directory entry) is allowed; apart from
+    that the path must have no empty, '.', or '..' segments, and no
+    backslashes. This also rejects a bare "/" (its core is a single empty
+    segment), which would otherwise match every file.
+    """
+    core = value[:-1] if value.endswith("/") else value
+    if "\\" in value or any(segment in ("", ".", "..") for segment in core.split("/")):
         raise ConfigError(
-            f"{path}: '{label}' destination for '{source}' must be a relative POSIX path"
-            f" without backslashes, '.', '..', or empty segments: {dest!r}"
+            f"{path}: {subject} must be a relative POSIX path"
+            f" without backslashes, '.', '..', or empty segments: {value!r}"
         )
 
 
@@ -390,7 +397,9 @@ def _parse_paths_mapping(
 ) -> dict[str, str | None]:
     """Validate a 'paths'-like mapping (source path -> destination path) and return it.
 
-    A null destination is allowed only when allow_null is True — a branch
+    A source and destination that both end in "/" form a directory entry;
+    mixing a directory on one side with a file on the other is rejected. A
+    null destination is allowed only when allow_null is True — a branch
     override uses it to remove an inherited remap.
     """
     if not isinstance(raw, dict):
@@ -399,6 +408,7 @@ def _parse_paths_mapping(
     for source, dest in raw.items():
         if not isinstance(source, str) or not source:
             raise ConfigError(f"{path}: keys of '{label}' must be non-empty strings: {source!r}")
+        _validate_remap_path(path, f"'{label}' source '{source}'", source)
         if dest is None:
             if not allow_null:
                 raise ConfigError(
@@ -408,7 +418,13 @@ def _parse_paths_mapping(
         elif not isinstance(dest, str):
             raise ConfigError(f"{path}: '{label}' destination for '{source}' must be a string.")
         else:
-            _validate_remap_destination(path, label, source, dest)
+            _validate_remap_path(path, f"'{label}' destination for '{source}'", dest)
+            if source.endswith("/") != dest.endswith("/"):
+                raise ConfigError(
+                    f"{path}: '{label}' entry for '{source}' must map a directory to a"
+                    " directory (both ending in '/') or a file to a file, not mix the"
+                    f" two: {dest!r}"
+                )
         result[source] = dest
     return result
 

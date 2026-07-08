@@ -119,18 +119,20 @@ When files with the same relative path exist in multiple profiles, `common/` has
 
 ## Path remapping (`paths`)
 
-By default every file is distributed at the same relative path it has inside its profile. The optional `paths:` mapping in `manifest.yaml` moves individual files to a different destination for this repository:
+By default every file is distributed at the same relative path it has inside its profile. The optional `paths:` mapping in `manifest.yaml` moves files to a different destination for this repository:
 
 ```yaml
 paths:
-  workflows/deploy.yaml: .github/workflows/deploy.yaml
-  pom.xml: services/user/pom.xml
+  pom.xml: services/user/pom.xml       # file entry: moves exactly this file
+  workflows/: .github/workflows/       # directory entry: moves every file under workflows/
 ```
 
 - The key (**source**) is the file's distribution path, **after** the `.jinja` suffix is stripped — so templating a file later does not break its remap. The value (**destination**) is the new distribution path, taken literally
-- Destinations must be relative POSIX paths: absolute paths, `.` / `..` / empty segments, and backslashes are rejected when the manifest is loaded
-- Each file is moved exactly once: sources always match the **original** distribution path, and the result of a remap is never remapped again. Swaps (`a: b` plus `b: a`) and chains (`a: b` plus `b: c`) therefore work without cascading
-- Collisions fail the build: two sources mapping to the same destination, or a destination colliding with a file that is not itself remapped
+- A source and destination that **both end in `/`** form a **directory entry**: every file under the source directory moves to the destination directory with its nested structure preserved, so dozens of files need only one line. Mixing a directory on one side with a file on the other is rejected
+- When several entries match the same file, the exact file entry wins over directory entries, and among directory entries the longest (most specific) prefix wins — so you can remap a whole directory while sending one special file somewhere else
+- Sources and destinations must be relative POSIX paths: absolute paths, `.` / `..` / empty segments, and backslashes are rejected when the manifest is loaded
+- Each file is moved at most once: sources always match the **original** distribution path, and the result of a remap is never remapped again. Swaps (`a: b` plus `b: a`) and chains (`a: b` plus `b: c`) therefore work without cascading, for directories as well as files
+- Collisions fail the build: two files ending up at the same destination path, whether from two remaps or from a remap landing on a file that is not itself remapped
 - [`.ghfanoutignore`](#ghfanoutignore) is unaffected — it matches source names before remapping
 - A source that matches no distributed file in **any** build variant fails the build, so typos are caught early. If a source matches in some variants but not others (e.g. on a branch that overrides `bases`), the remap is skipped there and reported in an info log
 
