@@ -387,7 +387,7 @@ class TestWriteBuildOutput:
         assert (output_dir / ".github" / "CODEOWNERS").read_bytes() == b"* @myorg/platform\n"
         assert (output_dir / ".gitignore").read_bytes() == b"target/\n"
 
-    def test_overwrites_existing_files_and_keeps_unrelated_files(
+    def test_overwrites_existing_files_without_deleting_unrelated_files(
         self, config_repo: Path, tmp_path: Path
     ) -> None:
         result = build_overlay_files(

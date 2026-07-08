@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import shutil
 from importlib.metadata import version as _pkg_version
 from pathlib import Path
 from typing import Annotated
@@ -121,6 +122,8 @@ def init(
 
 def _build_one(config_root: Path, root_config: RootConfig, overlay: str, output_dir: Path) -> None:
     """Build a single overlay and write the output to output_dir."""
+    if output_dir.exists():
+        shutil.rmtree(output_dir)
     # org is needed to resolve the built-in {{ org }} variable in templates (*.jinja)
     manifest = load_manifest(config_root, overlay)
     builds = build_per_variant(config_root, manifest, repo=overlay, org=root_config.org)
