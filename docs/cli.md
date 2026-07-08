@@ -10,6 +10,7 @@ ghfanout [GLOBAL OPTIONS] COMMAND [ARGS]
 | --- | --- |
 | `-C, --config-dir <dir>` | Explicitly specify the config repository root (defaults to searching upward from the current directory for `ghfanout.yaml`) |
 | `-v, --verbose` | Output verbose (DEBUG) logs |
+| `-V, --version` | Show the version and exit |
 
 ## init
 
