@@ -9,9 +9,24 @@ import pytest
 from github import GithubException, UnknownObjectException
 from typer.testing import CliRunner
 
+from ghfanout import __version__
 from ghfanout.cli import app
 
 runner = CliRunner()
+
+
+class TestVersionOption:
+    def test_prints_version_and_exits(self) -> None:
+        result = runner.invoke(app, ["--version"])
+
+        assert result.exit_code == 0
+        assert f"ghfanout {__version__}" in result.output
+
+    def test_short_flag(self) -> None:
+        result = runner.invoke(app, ["-V"])
+
+        assert result.exit_code == 0
+        assert f"ghfanout {__version__}" in result.output
 
 
 class TestInitCommand:

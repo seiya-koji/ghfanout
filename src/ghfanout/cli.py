@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from importlib.metadata import version as _pkg_version
 from pathlib import Path
 from typing import Annotated
 
@@ -34,6 +35,12 @@ app = typer.Typer(
 logger = logging.getLogger(__name__)
 
 
+def _version_callback(value: bool | None) -> None:
+    if value:
+        typer.echo(f"ghfanout {_pkg_version('ghfanout')}")
+        raise typer.Exit()
+
+
 @app.callback()
 def main(  # noqa: D103 -- help is set via typer.Typer(help=...) (docstring would leak into CLI help)
     ctx: typer.Context,
@@ -44,6 +51,16 @@ def main(  # noqa: D103 -- help is set via typer.Typer(help=...) (docstring woul
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Output verbose (DEBUG) logs")
     ] = False,
+    _version: Annotated[
+        bool | None,
+        typer.Option(
+            "--version",
+            "-V",
+            help="Show the version and exit.",
+            is_eager=True,
+            callback=_version_callback,
+        ),
+    ] = None,
 ) -> None:
     # force=True: reattach the handler to the current stderr on every CLI invocation
     logging.basicConfig(
