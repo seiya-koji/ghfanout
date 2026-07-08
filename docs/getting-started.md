@@ -20,6 +20,8 @@ Or, if you use [uv](https://docs.astral.sh/uv/):
 uv tool install ghfanout
 ```
 
+Later, upgrade to the latest release with `pip install --upgrade ghfanout` (or `uv tool upgrade ghfanout`).
+
 ## 2. Generate a config repository
 
 ghfanout reads its input from a *config repository*: a directory (usually its own Git repository) that declares what to distribute and where. `ghfanout init` generates a working scaffold with a sample:

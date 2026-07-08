@@ -20,6 +20,12 @@ pip install ghfanout        # or: uv tool install ghfanout
 
 Requires Python 3.11 or later (tested on 3.11–3.14).
 
+To upgrade to the latest release:
+
+```bash
+pip install --upgrade ghfanout   # or: uv tool upgrade ghfanout
+```
+
 ## Quick start
 
 ```bash
