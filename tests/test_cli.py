@@ -180,6 +180,28 @@ class TestBuildCommand:
         assert (output_dir / "main" / "pom.xml").read_bytes() == b"<version>1.0</version>\n"
         assert (output_dir / "release-1.x" / "pom.xml").read_bytes() == b"<version>0.9</version>\n"
 
+    def test_writes_per_branch_directory_when_paths_overridden_per_branch(
+        self, config_repo: Path, tmp_path: Path
+    ) -> None:
+        overlay_dir = config_repo / "overlays" / "user-service"
+        (overlay_dir / "manifest.yaml").write_text(
+            "bases:\n  - java-service\n"
+            "branches:\n  - main\n  - name: release-1.x\n    paths:\n"
+            "      pom.xml: legacy/pom.xml\n",
+            encoding="utf-8",
+        )
+        output_dir = tmp_path / "out"
+
+        result = runner.invoke(
+            app, ["-C", str(config_repo), "build", "user-service", "-o", str(output_dir)]
+        )
+
+        assert result.exit_code == 0, result.output
+        # main distributes pom.xml at its original path, release-1.x remaps it
+        assert (output_dir / "main" / "pom.xml").read_bytes() == b"<project/>\n"
+        assert (output_dir / "release-1.x" / "legacy" / "pom.xml").read_bytes() == b"<project/>\n"
+        assert not (output_dir / "release-1.x" / "pom.xml").exists()
+
     def test_writes_single_output_when_no_branch_specific_override_exists(
         self, config_repo: Path, tmp_path: Path
     ) -> None:

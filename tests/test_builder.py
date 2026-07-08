@@ -275,6 +275,120 @@ class TestTemplateRendering:
             )
 
 
+class TestPathRemapping:
+    def test_remaps_distribution_path(self, config_repo: Path) -> None:
+        manifest = Manifest(bases=("java-service",), paths={"pom.xml": "services/user/pom.xml"})
+
+        result = build_overlay_files(config_repo, manifest, repo="user-service", org="myorg")
+
+        assert result.files == {
+            ".gitignore": b"target/\n",
+            ".github/CODEOWNERS": b"* @myorg/platform\n",
+            "services/user/pom.xml": b"<project/>\n",
+        }
+        assert result.unmatched_path_sources == frozenset()
+
+    def test_sources_match_by_post_strip_name(self, config_repo: Path) -> None:
+        # Sources use the distribution path (after the .jinja suffix is
+        # stripped), so templating a file does not break its remap
+        java_dir = config_repo / "base" / "java-service"
+        (java_dir / "pom.xml").unlink()
+        (java_dir / "pom.xml.jinja").write_text(
+            "<artifactId>{{ repo }}</artifactId>\n", encoding="utf-8"
+        )
+        manifest = Manifest(bases=("java-service",), paths={"pom.xml": "services/pom.xml"})
+
+        result = build_overlay_files(config_repo, manifest, repo="user-service", org="myorg")
+
+        assert result.files["services/pom.xml"] == b"<artifactId>user-service</artifactId>\n"
+        assert "pom.xml" not in result.files
+
+    def test_destination_ending_in_jinja_is_not_rendered_again(self, config_repo: Path) -> None:
+        # Remapping happens after rendering; a destination that happens to end
+        # in .jinja is distributed under that name as-is
+        manifest = Manifest(bases=("java-service",), paths={"pom.xml": "pom.xml.jinja"})
+
+        result = build_overlay_files(config_repo, manifest, repo="user-service", org="myorg")
+
+        assert result.files["pom.xml.jinja"] == b"<project/>\n"
+
+    def test_noop_remap_to_same_path_is_allowed(self, config_repo: Path) -> None:
+        manifest = Manifest(bases=("java-service",), paths={"pom.xml": "pom.xml"})
+
+        result = build_overlay_files(config_repo, manifest, repo="user-service", org="myorg")
+
+        assert result.files["pom.xml"] == b"<project/>\n"
+
+    def test_swap_remaps_exchange_contents(self, config_repo: Path) -> None:
+        # The collision check ignores files that are themselves remapped away
+        java_dir = config_repo / "base" / "java-service"
+        (java_dir / "a.txt").write_bytes(b"A\n")
+        (java_dir / "b.txt").write_bytes(b"B\n")
+        manifest = Manifest(bases=("java-service",), paths={"a.txt": "b.txt", "b.txt": "a.txt"})
+
+        result = build_overlay_files(config_repo, manifest, repo="user-service", org="myorg")
+
+        assert result.files["a.txt"] == b"B\n"
+        assert result.files["b.txt"] == b"A\n"
+
+    def test_chain_remaps_do_not_cascade(self, config_repo: Path) -> None:
+        # a -> b and b -> c each move one file; the result of a remap is never
+        # remapped again (a's content ends at b, not c)
+        java_dir = config_repo / "base" / "java-service"
+        (java_dir / "a.txt").write_bytes(b"A\n")
+        (java_dir / "b.txt").write_bytes(b"B\n")
+        manifest = Manifest(bases=("java-service",), paths={"a.txt": "b.txt", "b.txt": "c.txt"})
+
+        result = build_overlay_files(config_repo, manifest, repo="user-service", org="myorg")
+
+        assert result.files["b.txt"] == b"A\n"
+        assert result.files["c.txt"] == b"B\n"
+        assert "a.txt" not in result.files
+
+    def test_destination_matching_ignore_pattern_is_still_distributed(
+        self, config_repo: Path
+    ) -> None:
+        # .ghfanoutignore matches source names before remapping, so a
+        # destination that happens to match a pattern is not excluded
+        (config_repo / ".ghfanoutignore").write_text("docs/\n", encoding="utf-8")
+        manifest = Manifest(bases=("java-service",), paths={"pom.xml": "docs/pom.xml"})
+
+        result = build_overlay_files(config_repo, manifest, repo="user-service", org="myorg")
+
+        assert result.files["docs/pom.xml"] == b"<project/>\n"
+
+    def test_unmatched_source_is_reported_not_raised(self, config_repo: Path) -> None:
+        # build_overlay_files alone does not fail: build_per_variant judges
+        # unmatched sources across all variants
+        manifest = Manifest(bases=("java-service",), paths={"no-such.txt": "dest.txt"})
+
+        result = build_overlay_files(config_repo, manifest, repo="user-service", org="myorg")
+
+        assert result.unmatched_path_sources == frozenset({"no-such.txt"})
+        assert "dest.txt" not in result.files
+        assert result.files["pom.xml"] == b"<project/>\n"
+
+    def test_raises_build_error_when_two_sources_map_to_same_destination(
+        self, config_repo: Path
+    ) -> None:
+        java_dir = config_repo / "base" / "java-service"
+        (java_dir / "a.txt").write_bytes(b"A\n")
+        manifest = Manifest(
+            bases=("java-service",), paths={"a.txt": "same.txt", "pom.xml": "same.txt"}
+        )
+
+        with pytest.raises(BuildError, match=re.escape("both map to 'same.txt'")):
+            build_overlay_files(config_repo, manifest, repo="user-service", org="myorg")
+
+    def test_raises_build_error_when_destination_collides_with_unremapped_file(
+        self, config_repo: Path
+    ) -> None:
+        manifest = Manifest(bases=("java-service",), paths={"pom.xml": ".gitignore"})
+
+        with pytest.raises(BuildError, match=re.escape("collides with a file that is not")):
+            build_overlay_files(config_repo, manifest, repo="user-service", org="myorg")
+
+
 class TestVariantKey:
     def test_different_values_yield_different_key_even_with_same_bases(self) -> None:
         manifest = Manifest(
@@ -323,6 +437,46 @@ class TestVariantKey:
             manifest, manifest.branches[1]
         )
 
+    def test_different_paths_yield_different_key_even_with_same_bases_and_values(self) -> None:
+        manifest = Manifest(
+            bases=("java-service",),
+            paths={"pom.xml": "services/pom.xml"},
+            branches=(
+                BranchSpec(name="main"),
+                BranchSpec(name="release-1.x", paths={"pom.xml": "legacy/pom.xml"}),
+            ),
+        )
+        assert variant_key(manifest, manifest.branches[0]) != variant_key(
+            manifest, manifest.branches[1]
+        )
+
+    def test_same_effective_paths_yield_same_key(self) -> None:
+        manifest = Manifest(
+            bases=("java-service",),
+            paths={"pom.xml": "services/pom.xml"},
+            branches=(
+                BranchSpec(name="main"),
+                # Explicitly overriding with the same content is the same variant
+                BranchSpec(name="develop", paths={"pom.xml": "services/pom.xml"}),
+            ),
+        )
+        assert variant_key(manifest, manifest.branches[0]) == variant_key(
+            manifest, manifest.branches[1]
+        )
+
+    def test_null_removal_changes_effective_paths_and_key(self) -> None:
+        manifest = Manifest(
+            bases=("java-service",),
+            paths={"pom.xml": "services/pom.xml"},
+            branches=(
+                BranchSpec(name="main"),
+                BranchSpec(name="release-1.x", paths={"pom.xml": None}),
+            ),
+        )
+        assert variant_key(manifest, manifest.branches[0]) != variant_key(
+            manifest, manifest.branches[1]
+        )
+
 
 class TestBuildPerVariant:
     def test_builds_only_unique_variants(self, config_repo: Path) -> None:
@@ -364,6 +518,103 @@ class TestBuildPerVariant:
         # the default branch's BranchSpec)
         build = builds[variant_key(manifest, BranchSpec(name="main"))]
         assert build.files["pom.xml"] == b"<project/>\n"
+
+    def test_branch_specific_paths_produce_distinct_builds(self, config_repo: Path) -> None:
+        manifest = Manifest(
+            bases=("java-service",),
+            paths={"pom.xml": "services/pom.xml"},
+            branches=(
+                BranchSpec(name="main"),
+                BranchSpec(name="release-1.x", paths={"pom.xml": "legacy/pom.xml"}),
+            ),
+        )
+
+        builds = build_per_variant(config_repo, manifest, repo="user-service", org="myorg")
+
+        assert len(builds) == 2
+        main_build = builds[variant_key(manifest, manifest.branches[0])]
+        assert main_build.files["services/pom.xml"] == b"<project/>\n"
+        release_build = builds[variant_key(manifest, manifest.branches[1])]
+        assert release_build.files["legacy/pom.xml"] == b"<project/>\n"
+        assert "services/pom.xml" not in release_build.files
+
+    def test_raises_build_error_for_unmatched_source_without_branches(
+        self, config_repo: Path
+    ) -> None:
+        # With branches omitted there is exactly one variant, so an unmatched
+        # source has matched nowhere and is rejected right away
+        manifest = Manifest(bases=("java-service",), paths={"typo.txt": "dest.txt"})
+
+        with pytest.raises(BuildError, match=re.escape("typo.txt")):
+            build_per_variant(config_repo, manifest, repo="user-service", org="myorg")
+
+    def test_raises_build_error_listing_all_never_matched_sources(self, config_repo: Path) -> None:
+        manifest = Manifest(
+            bases=("java-service",),
+            paths={"typo-b.txt": "x.txt", "typo-a.txt": "y.txt"},
+            branches=(BranchSpec(name="main"), BranchSpec(name="develop")),
+        )
+
+        with pytest.raises(BuildError, match=re.escape("typo-a.txt, typo-b.txt")):
+            build_per_variant(config_repo, manifest, repo="user-service", org="myorg")
+
+    def test_source_missing_in_some_variants_logs_info_instead_of_raising(
+        self, config_repo: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # java-service has pom.xml but the docs branch (bases: []) does not:
+        # the remap is skipped there, reported as info rather than an error
+        manifest = Manifest(
+            bases=("java-service",),
+            paths={"pom.xml": "services/pom.xml"},
+            branches=(BranchSpec(name="main"), BranchSpec(name="docs", bases=())),
+        )
+
+        with caplog.at_level(logging.INFO, logger="ghfanout.builder"):
+            builds = build_per_variant(config_repo, manifest, repo="user-service", org="myorg")
+
+        main_build = builds[variant_key(manifest, manifest.branches[0])]
+        assert main_build.files["services/pom.xml"] == b"<project/>\n"
+        docs_build = builds[variant_key(manifest, manifest.branches[1])]
+        assert "services/pom.xml" not in docs_build.files
+        skip_logs = [r for r in caplog.records if "remap skipped" in r.getMessage()]
+        assert len(skip_logs) == 1
+        assert "pom.xml" in skip_logs[0].getMessage()
+
+    def test_source_only_in_branch_override_matches_within_its_variant(
+        self, config_repo: Path
+    ) -> None:
+        java_dir = config_repo / "base" / "java-service"
+        (java_dir / "ci.txt").write_bytes(b"ci\n")
+        manifest = Manifest(
+            bases=("java-service",),
+            branches=(
+                BranchSpec(name="main"),
+                BranchSpec(name="release-1.x", paths={"ci.txt": "workflows/ci.txt"}),
+            ),
+        )
+
+        builds = build_per_variant(config_repo, manifest, repo="user-service", org="myorg")
+
+        main_build = builds[variant_key(manifest, manifest.branches[0])]
+        assert main_build.files["ci.txt"] == b"ci\n"
+        release_build = builds[variant_key(manifest, manifest.branches[1])]
+        assert release_build.files["workflows/ci.txt"] == b"ci\n"
+
+    def test_raises_build_error_for_unmatched_source_only_in_branch_override(
+        self, config_repo: Path
+    ) -> None:
+        # A source appearing only in one branch's override is judged within
+        # the variants it applies to — matching nowhere is still an error
+        manifest = Manifest(
+            bases=("java-service",),
+            branches=(
+                BranchSpec(name="main"),
+                BranchSpec(name="release-1.x", paths={"typo.txt": "x.txt"}),
+            ),
+        )
+
+        with pytest.raises(BuildError, match=re.escape("typo.txt")):
+            build_per_variant(config_repo, manifest, repo="user-service", org="myorg")
 
 
 class TestWriteBuildOutput:

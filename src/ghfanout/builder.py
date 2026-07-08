@@ -45,9 +45,13 @@ class BuildResult:
 
     Attributes:
         files: Mapping of POSIX-style relative path -> file content.
+        unmatched_path_sources: Manifest paths: sources that matched no file in
+            this build. Not an error by itself — build_per_variant judges
+            across variants and rejects sources that match nowhere at all.
     """
 
     files: dict[str, bytes]
+    unmatched_path_sources: frozenset[str] = frozenset()
 
 
 def _render_template(
@@ -89,6 +93,48 @@ def _render_templates(
     return result
 
 
+def _apply_path_remaps(
+    files: dict[str, bytes], paths: dict[str, str]
+) -> tuple[dict[str, bytes], frozenset[str]]:
+    """Apply the manifest's paths: remaps to the rendered file set.
+
+    Sources match the distribution path (after the .jinja suffix is stripped);
+    the result of a remap is never remapped again. Swaps (a -> b, b -> a) and
+    chains (a -> b, b -> c) are fine because the collision check ignores files
+    that are themselves remapped away.
+
+    Returns:
+        The remapped files, and the sources that matched no file (judged
+        across variants by build_per_variant, not an error here).
+
+    Raises:
+        BuildError: If two sources map to the same destination, or a
+            destination collides with a file that is not remapped.
+    """
+    if not paths:
+        return files, frozenset()
+    remap_origins: dict[str, str] = {}
+    result: dict[str, bytes] = {}
+    for rel_path, content in files.items():
+        dest = paths.get(rel_path)
+        if dest is None:
+            result[rel_path] = content
+            continue
+        if dest in remap_origins:
+            raise BuildError(
+                f"manifest.yaml paths: '{remap_origins[dest]}' and '{rel_path}' both map"
+                f" to '{dest}'."
+            )
+        if dest in files and dest not in paths:
+            raise BuildError(
+                f"manifest.yaml paths: destination '{dest}' for '{rel_path}' collides with"
+                " a file that is not remapped."
+            )
+        remap_origins[dest] = rel_path
+        result[dest] = content
+    return result, frozenset(source for source in paths if source not in files)
+
+
 def _load_ignore_spec(config_root: Path) -> GitIgnoreSpec:
     """Load the .ghfanoutignore at the config repository root.
 
@@ -113,11 +159,12 @@ def build_overlay_files(
     in bases: (the same relative path is fully overwritten by the later one,
     and an info log records the override). Files matched by the config
     repository's .ghfanoutignore are excluded before composition. After
-    composition, *.jinja files are rendered and lose their extension.
+    composition, *.jinja files are rendered and lose their extension, then the
+    manifest's paths: remaps are applied to the resulting distribution paths.
 
     Args:
         config_root: Config repository root.
-        manifest: Manifest whose bases / values are already effective.
+        manifest: Manifest whose bases / values / paths are already effective.
         repo: Fills the built-in {{ repo }} template variable.
         org: Fills the built-in {{ org }} template variable.
 
@@ -160,11 +207,14 @@ def build_overlay_files(
             files[rel_path] = file_path.read_bytes()
             origins[rel_path] = profile
 
-    return BuildResult(files=_render_templates(files, repo=repo, org=org, values=manifest.values))
+    rendered = _render_templates(files, repo=repo, org=org, values=manifest.values)
+    remapped, unmatched = _apply_path_remaps(rendered, manifest.paths)
+    return BuildResult(files=remapped, unmatched_path_sources=unmatched)
 
 
-# Key identifying a unique combination of build inputs (bases and values) effective for a branch.
-BuildVariantKey = tuple[tuple[str, ...], Hashable]
+# Key identifying a unique combination of build inputs (bases, values, and paths)
+# effective for a branch.
+BuildVariantKey = tuple[tuple[str, ...], Hashable, Hashable]
 
 
 def _freeze(obj: object) -> Hashable:
@@ -178,33 +228,69 @@ def _freeze(obj: object) -> Hashable:
 
 
 def variant_key(manifest: Manifest, spec: BranchSpec) -> BuildVariantKey:
-    """Return a cache key identifying the (bases, values) effective for spec."""
-    return (manifest.bases_for(spec), _freeze(manifest.values_for(spec)))
+    """Return a cache key identifying the (bases, values, paths) effective for spec."""
+    return (
+        manifest.bases_for(spec),
+        _freeze(manifest.values_for(spec)),
+        _freeze(manifest.paths_for(spec)),
+    )
 
 
 def build_per_variant(
     config_root: Path, manifest: Manifest, *, repo: str, org: str
 ) -> dict[BuildVariantKey, BuildResult]:
-    """Build each unique combination of effective (bases, values) per branch exactly once.
+    """Build each unique combination of effective (bases, values, paths) per branch exactly once.
 
     When branches is omitted (default branch only), build just the one
     top-level combination.
 
+    A paths: source that matches no file in some variants (e.g. because a
+    branch overrides bases) is skipped there with an info log, but a source
+    that matches nowhere at all is reported as an error — a typo would never
+    match anything.
+
     Returns:
         Mapping of variant_key() -> build result.
+
+    Raises:
+        BuildError: If a variant fails to build, or a paths: source matched no
+            distributed file in any variant it applies to.
     """
-    # The dummy spec has both bases / values as None (= inherit top-level), so
-    # it produces the same key as the BranchSpec(name=<branch name>) that
+    # The dummy spec has bases / values / paths all None (= inherit top-level),
+    # so it produces the same key as the BranchSpec(name=<branch name>) that
     # deploy uses for the default branch.
     specs = manifest.branches or (BranchSpec(name=""),)
     builds: dict[BuildVariantKey, BuildResult] = {}
+    seen_sources: set[str] = set()
+    matched_sources: set[str] = set()
+    unmatched_sources: set[str] = set()
     for spec in specs:
         key = variant_key(manifest, spec)
         if key not in builds:
             effective = replace(
-                manifest, bases=manifest.bases_for(spec), values=manifest.values_for(spec)
+                manifest,
+                bases=manifest.bases_for(spec),
+                values=manifest.values_for(spec),
+                paths=manifest.paths_for(spec),
             )
-            builds[key] = build_overlay_files(config_root, effective, repo=repo, org=org)
+            build = build_overlay_files(config_root, effective, repo=repo, org=org)
+            builds[key] = build
+            seen_sources.update(effective.paths)
+            unmatched_sources.update(build.unmatched_path_sources)
+            matched_sources.update(
+                source for source in effective.paths if source not in build.unmatched_path_sources
+            )
+    never_matched = sorted(seen_sources - matched_sources)
+    if never_matched:
+        raise BuildError(
+            "manifest.yaml paths: these sources matched no distributed file in any build"
+            f" variant: {', '.join(never_matched)} (sources are matched against the"
+            f" distribution path, after the {TEMPLATE_SUFFIX} suffix is stripped)."
+        )
+    for source in sorted(matched_sources & unmatched_sources):
+        logger.info(
+            "paths: source %s is not present in some build variants; remap skipped there", source
+        )
     return builds
 
 

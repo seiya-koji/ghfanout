@@ -9,7 +9,7 @@
 **Configuration-as-Code for many GitHub repositories.** Manage shared configuration files (`.gitignore`, `pom.xml`, `pyproject.toml`, `package.json`, …) in one place — a single source of truth — and fan them out as pull requests (or direct pushes). Edit a file once, run one command, and every affected repository gets a PR.
 
 - **No `git clone` of target repositories** — everything goes through the GitHub Git Data API, so it works with nothing more than `pip install`
-- **Kustomize-like base + overlay composition**, with Jinja2 templating for per-repository values
+- **Kustomize-like base + overlay composition**, with Jinja2 templating for per-repository values and per-repository remapping of distribution paths
 - **Designed for microservice fleets** that cannot be consolidated into a monorepo
 
 ## Installation

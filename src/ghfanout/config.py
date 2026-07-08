@@ -79,11 +79,15 @@ class BranchSpec:
             explicit empty tuple means "distribute only common/").
         values: Branch-specific values; None uses the top-level values as-is,
             otherwise deep-merged into them (unlike bases, which is replaced).
+        paths: Branch-specific path remaps; None uses the top-level paths
+            as-is, otherwise shallow-merged into them (a null destination
+            removes the inherited remap for that source).
     """
 
     name: str
     bases: tuple[str, ...] | None = None
     values: dict[str, object] | None = None
+    paths: dict[str, str | None] | None = None
 
 
 def _deep_merge(base: dict[str, object], override: dict[str, object]) -> dict[str, object]:
@@ -115,12 +119,16 @@ class Manifest:
             None inherits it.
         values: Values (optionally nested) referenced from templates (*.jinja)
             via {{ values.xxx }}.
+        paths: Distribution path remaps (source -> destination). Sources are
+            matched against the distribution path, after the .jinja suffix is
+            stripped.
     """
 
     bases: tuple[str, ...] = ()
     branches: tuple[BranchSpec, ...] = ()
     deploy_mode: DeployMode | None = None
     values: dict[str, object] = field(default_factory=dict)
+    paths: dict[str, str] = field(default_factory=dict)
 
     def bases_for(self, spec: BranchSpec) -> tuple[str, ...]:
         """Effective bases for the branch (inherited when there is no branch override)."""
@@ -132,10 +140,25 @@ class Manifest:
             return self.values
         return _deep_merge(self.values, spec.values)
 
+    def paths_for(self, spec: BranchSpec) -> dict[str, str]:
+        """Effective paths for the branch (branch override shallow-merged into the top level).
+
+        Unlike values (a recursive deep merge), paths is a flat source ->
+        destination mapping, so the merge is per source; a null destination in
+        the branch override removes the inherited remap for that source.
+        """
+        if spec.paths is None:
+            return self.paths
+        merged: dict[str, str | None] = {**self.paths, **spec.paths}
+        return {source: dest for source, dest in merged.items() if dest is not None}
+
     @property
     def has_branch_specific_build(self) -> bool:
-        """Whether any branch overrides bases or values (i.e., needs a branch-specific build)."""
-        return any(spec.bases is not None or spec.values is not None for spec in self.branches)
+        """Whether any branch overrides bases, values, or paths (needs a branch-specific build)."""
+        return any(
+            spec.bases is not None or spec.values is not None or spec.paths is not None
+            for spec in self.branches
+        )
 
 
 def find_config_root(start_dir: Path) -> Path:
@@ -282,7 +305,7 @@ def _parse_bases(path: Path, raw: object, label: str) -> tuple[str, ...]:
 
 
 # Keys allowed on object elements of branches: (unknown keys are rejected to catch typos)
-_BRANCH_SPEC_KEYS = frozenset({"name", "bases", "values"})
+_BRANCH_SPEC_KEYS = frozenset({"name", "bases", "values", "paths"})
 
 
 def _parse_branch_spec(path: Path, item: object) -> BranchSpec:
@@ -307,7 +330,12 @@ def _parse_branch_spec(path: Path, item: object) -> BranchSpec:
             if "values" in item
             else None
         )
-        return BranchSpec(name=name, bases=bases, values=values)
+        paths = (
+            _parse_paths_mapping(path, item["paths"], "branches[].paths", allow_null=True)
+            if "paths" in item
+            else None
+        )
+        return BranchSpec(name=name, bases=bases, values=values, paths=paths)
     raise ConfigError(
         f"{path}: a 'branches' element must be either a branch name string or a "
         "mapping with name / bases."
@@ -348,6 +376,53 @@ def _parse_values(path: Path, data: dict[str, object]) -> dict[str, object]:
     return _parse_values_mapping(path, data.get("values"), "values")
 
 
+def _validate_remap_destination(path: Path, label: str, source: str, dest: str) -> None:
+    """Validate a 'paths'-like destination as a relative POSIX path."""
+    if "\\" in dest or any(segment in ("", ".", "..") for segment in dest.split("/")):
+        raise ConfigError(
+            f"{path}: '{label}' destination for '{source}' must be a relative POSIX path"
+            f" without backslashes, '.', '..', or empty segments: {dest!r}"
+        )
+
+
+def _parse_paths_mapping(
+    path: Path, raw: object, label: str, *, allow_null: bool
+) -> dict[str, str | None]:
+    """Validate a 'paths'-like mapping (source path -> destination path) and return it.
+
+    A null destination is allowed only when allow_null is True — a branch
+    override uses it to remove an inherited remap.
+    """
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{path}: '{label}' must be a mapping (key: value).")
+    result: dict[str, str | None] = {}
+    for source, dest in raw.items():
+        if not isinstance(source, str) or not source:
+            raise ConfigError(f"{path}: keys of '{label}' must be non-empty strings: {source!r}")
+        if dest is None:
+            if not allow_null:
+                raise ConfigError(
+                    f"{path}: '{label}' has a null destination for '{source}' (null is only"
+                    " allowed in a branch override, to remove an inherited remap)."
+                )
+        elif not isinstance(dest, str):
+            raise ConfigError(f"{path}: '{label}' destination for '{source}' must be a string.")
+        else:
+            _validate_remap_destination(path, label, source, dest)
+        result[source] = dest
+    return result
+
+
+def _parse_paths(path: Path, data: dict[str, object]) -> dict[str, str]:
+    """Validate and return the top-level 'paths' key, defaulting to an empty dict."""
+    raw = data.get("paths")
+    if raw is None:
+        return {}
+    parsed = _parse_paths_mapping(path, raw, "paths", allow_null=False)
+    # allow_null=False rejected null destinations, so this only narrows the value type
+    return {source: dest for source, dest in parsed.items() if dest is not None}
+
+
 def load_manifest(config_root: Path, overlay: str) -> Manifest:
     """Load overlays/<overlay>/manifest.yaml.
 
@@ -365,6 +440,7 @@ def load_manifest(config_root: Path, overlay: str) -> Manifest:
         branches=_parse_branches(path, data),
         deploy_mode=_parse_deploy_mode(path, data),
         values=_parse_values(path, data),
+        paths=_parse_paths(path, data),
     )
 
 

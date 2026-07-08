@@ -85,7 +85,7 @@ bases:
 # Destination branches (defaults to the target repository's default branch)
 # branches:
 #   - main
-#   # Using the object form lets you override bases or values for just that branch
+#   # Using the object form lets you override bases, values, or paths for just that branch
 #   - name: release-1.x
 #     bases: [java-service-legacy]
 #     # Per-branch values are deep-merged into the top-level values
@@ -97,6 +97,10 @@ bases:
 # repo (repository name) and org are available even without defining values
 # values:
 #   version: "1.2.3"
+# Remap distribution paths (source -> destination). Sources are matched against the
+# distribution path, after any .jinja suffix is stripped
+# paths:
+#   pom.xml: services/user/pom.xml
 """
 
 

@@ -458,6 +458,194 @@ class TestLoadManifest:
             "maven": "disabled",
         }
 
+    def test_loads_paths(self, config_repo: Path) -> None:
+        overlay_dir = config_repo / "overlays" / "user-service"
+        (overlay_dir / "manifest.yaml").write_text(
+            "bases:\n  - java-service\npaths:\n  pom.xml: services/user/pom.xml\n",
+            encoding="utf-8",
+        )
+        manifest = load_manifest(config_repo, "user-service")
+        assert manifest.paths == {"pom.xml": "services/user/pom.xml"}
+
+    def test_defaults_paths_to_empty_dict_when_omitted(self, config_repo: Path) -> None:
+        manifest = load_manifest(config_repo, "user-service")
+        assert manifest.paths == {}
+
+    def test_can_override_paths_per_branch_via_object_element(self, config_repo: Path) -> None:
+        # A null destination is allowed only in a branch override (removes the remap)
+        overlay_dir = config_repo / "overlays" / "user-service"
+        (overlay_dir / "manifest.yaml").write_text(
+            "bases:\n  - java-service\n"
+            "paths:\n  pom.xml: services/user/pom.xml\n"
+            "branches:\n  - main\n  - name: release-1.x\n    paths:\n"
+            "      pom.xml: legacy/pom.xml\n"
+            "      extra.txt: null\n",
+            encoding="utf-8",
+        )
+        manifest = load_manifest(config_repo, "user-service")
+        assert manifest.paths == {"pom.xml": "services/user/pom.xml"}
+        assert manifest.branches == (
+            BranchSpec(name="main"),
+            BranchSpec(name="release-1.x", paths={"pom.xml": "legacy/pom.xml", "extra.txt": None}),
+        )
+
+    def test_paths_for_shallow_merges_branch_override_into_top_level(self) -> None:
+        manifest = Manifest(
+            paths={"pom.xml": "services/user/pom.xml", "ci.yml": ".github/workflows/ci.yml"},
+            branches=(
+                BranchSpec(name="main"),
+                BranchSpec(
+                    name="release-1.x",
+                    paths={"pom.xml": "legacy/pom.xml", "extra.txt": "docs/extra.txt"},
+                ),
+            ),
+        )
+        # No paths key (None) inherits the top level as-is
+        assert manifest.paths_for(manifest.branches[0]) == manifest.paths
+        # The merge is per source: inherited entries are kept unless overridden
+        assert manifest.paths_for(manifest.branches[1]) == {
+            "pom.xml": "legacy/pom.xml",
+            "ci.yml": ".github/workflows/ci.yml",
+            "extra.txt": "docs/extra.txt",
+        }
+
+    def test_paths_for_removes_remap_when_branch_destination_is_null(self) -> None:
+        manifest = Manifest(
+            paths={"pom.xml": "services/user/pom.xml", "ci.yml": ".github/workflows/ci.yml"},
+            branches=(BranchSpec(name="release-1.x", paths={"ci.yml": None, "unknown.txt": None}),),
+        )
+        # null removes the inherited remap; null for a source without a remap is harmless
+        assert manifest.paths_for(manifest.branches[0]) == {"pom.xml": "services/user/pom.xml"}
+
+    def test_has_branch_specific_build_reflects_paths_override(self) -> None:
+        with_paths = Manifest(
+            bases=("java-service",),
+            branches=(BranchSpec(name="release-1.x", paths={"pom.xml": "legacy/pom.xml"}),),
+        )
+        assert with_paths.has_branch_specific_build is True
+
+    def test_raises_config_error_when_paths_is_not_a_mapping(self, config_repo: Path) -> None:
+        overlay_dir = config_repo / "overlays" / "user-service"
+        (overlay_dir / "manifest.yaml").write_text(
+            "bases:\n  - java-service\npaths:\n  - a\n", encoding="utf-8"
+        )
+        with pytest.raises(ConfigError, match="paths"):
+            load_manifest(config_repo, "user-service")
+
+    def test_raises_config_error_for_non_string_paths_key(self, config_repo: Path) -> None:
+        # In YAML, keys like 1: are parsed as int, so they are explicitly rejected
+        overlay_dir = config_repo / "overlays" / "user-service"
+        (overlay_dir / "manifest.yaml").write_text(
+            "bases:\n  - java-service\npaths:\n  1: one.txt\n", encoding="utf-8"
+        )
+        with pytest.raises(ConfigError, match="non-empty strings"):
+            load_manifest(config_repo, "user-service")
+
+    def test_raises_config_error_for_empty_paths_key(self, config_repo: Path) -> None:
+        overlay_dir = config_repo / "overlays" / "user-service"
+        (overlay_dir / "manifest.yaml").write_text(
+            'bases:\n  - java-service\npaths:\n  "": dest.txt\n', encoding="utf-8"
+        )
+        with pytest.raises(ConfigError, match="non-empty strings"):
+            load_manifest(config_repo, "user-service")
+
+    def test_raises_config_error_for_non_string_paths_destination(self, config_repo: Path) -> None:
+        overlay_dir = config_repo / "overlays" / "user-service"
+        (overlay_dir / "manifest.yaml").write_text(
+            "bases:\n  - java-service\npaths:\n  pom.xml: [a]\n", encoding="utf-8"
+        )
+        with pytest.raises(ConfigError, match="must be a string"):
+            load_manifest(config_repo, "user-service")
+
+    def test_raises_config_error_for_null_destination_at_top_level(self, config_repo: Path) -> None:
+        overlay_dir = config_repo / "overlays" / "user-service"
+        (overlay_dir / "manifest.yaml").write_text(
+            "bases:\n  - java-service\npaths:\n  pom.xml: null\n", encoding="utf-8"
+        )
+        with pytest.raises(ConfigError, match="null is only"):
+            load_manifest(config_repo, "user-service")
+
+    def test_raises_config_error_when_branch_paths_is_not_a_mapping(
+        self, config_repo: Path
+    ) -> None:
+        overlay_dir = config_repo / "overlays" / "user-service"
+        (overlay_dir / "manifest.yaml").write_text(
+            "bases:\n  - java-service\nbranches:\n  - name: main\n    paths: [a]\n",
+            encoding="utf-8",
+        )
+        with pytest.raises(ConfigError, match=re.escape("branches[].paths")):
+            load_manifest(config_repo, "user-service")
+
+    def test_raises_config_error_for_non_string_branch_paths_destination(
+        self, config_repo: Path
+    ) -> None:
+        # Only strings and null (removal) are allowed as branch override destinations
+        overlay_dir = config_repo / "overlays" / "user-service"
+        (overlay_dir / "manifest.yaml").write_text(
+            "bases:\n  - java-service\nbranches:\n  - name: main\n    paths:\n      pom.xml: 123\n",
+            encoding="utf-8",
+        )
+        with pytest.raises(ConfigError, match="must be a string"):
+            load_manifest(config_repo, "user-service")
+
+    def test_raises_config_error_for_absolute_paths_destination(self, config_repo: Path) -> None:
+        overlay_dir = config_repo / "overlays" / "user-service"
+        (overlay_dir / "manifest.yaml").write_text(
+            "bases:\n  - java-service\npaths:\n  pom.xml: /etc/pom.xml\n", encoding="utf-8"
+        )
+        with pytest.raises(ConfigError, match="relative POSIX path"):
+            load_manifest(config_repo, "user-service")
+
+    def test_raises_config_error_for_parent_segment_in_paths_destination(
+        self, config_repo: Path
+    ) -> None:
+        overlay_dir = config_repo / "overlays" / "user-service"
+        (overlay_dir / "manifest.yaml").write_text(
+            "bases:\n  - java-service\npaths:\n  pom.xml: ../pom.xml\n", encoding="utf-8"
+        )
+        with pytest.raises(ConfigError, match="relative POSIX path"):
+            load_manifest(config_repo, "user-service")
+
+    def test_raises_config_error_for_dot_segment_in_paths_destination(
+        self, config_repo: Path
+    ) -> None:
+        overlay_dir = config_repo / "overlays" / "user-service"
+        (overlay_dir / "manifest.yaml").write_text(
+            "bases:\n  - java-service\npaths:\n  pom.xml: ./pom.xml\n", encoding="utf-8"
+        )
+        with pytest.raises(ConfigError, match="relative POSIX path"):
+            load_manifest(config_repo, "user-service")
+
+    def test_raises_config_error_for_trailing_slash_in_paths_destination(
+        self, config_repo: Path
+    ) -> None:
+        # A trailing slash produces an empty segment, so the same check catches it
+        overlay_dir = config_repo / "overlays" / "user-service"
+        (overlay_dir / "manifest.yaml").write_text(
+            "bases:\n  - java-service\npaths:\n  pom.xml: dir/\n", encoding="utf-8"
+        )
+        with pytest.raises(ConfigError, match="relative POSIX path"):
+            load_manifest(config_repo, "user-service")
+
+    def test_raises_config_error_for_backslash_in_paths_destination(
+        self, config_repo: Path
+    ) -> None:
+        # Distribution paths are POSIX; backslashes would break Windows checkouts anyway
+        overlay_dir = config_repo / "overlays" / "user-service"
+        (overlay_dir / "manifest.yaml").write_text(
+            "bases:\n  - java-service\npaths:\n  pom.xml: 'dir\\pom.xml'\n", encoding="utf-8"
+        )
+        with pytest.raises(ConfigError, match="relative POSIX path"):
+            load_manifest(config_repo, "user-service")
+
+    def test_raises_config_error_for_empty_paths_destination(self, config_repo: Path) -> None:
+        overlay_dir = config_repo / "overlays" / "user-service"
+        (overlay_dir / "manifest.yaml").write_text(
+            'bases:\n  - java-service\npaths:\n  pom.xml: ""\n', encoding="utf-8"
+        )
+        with pytest.raises(ConfigError, match="relative POSIX path"):
+            load_manifest(config_repo, "user-service")
+
 
 class TestListOverlays:
     def test_returns_only_directories_with_manifest_sorted(self, config_repo: Path) -> None:
