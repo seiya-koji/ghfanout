@@ -99,6 +99,8 @@ branches:              # Destination branches. Defaults to the target repository
 deploy_mode: push      # Override the deployment method for only this repository (defaults to ghfanout.yaml's value)
 values:                # Values referenced from templates (*.jinja) (optional, can be nested)
   version: "1.2.3"
+paths:                 # Remap distribution paths (optional, see Path remapping below)
+  pom.xml: services/user/pom.xml
 ```
 
 | Key | Required | Description |
@@ -107,6 +109,7 @@ values:                # Values referenced from templates (*.jinja) (optional, c
 | `branches` | | Destination branches. Defaults to the target repository's default branch only. Elements can be strings or objects (see [Per-branch overrides](#per-branch-overrides)) |
 | `deploy_mode` | | Overrides `ghfanout.yaml`'s `deploy_mode` for this repository only |
 | `values` | | Values referenced from templates; can be nested. See [Templates](templates.md) |
+| `paths` | | Remaps distribution paths (source → destination) for this repository. See [Path remapping](#path-remapping-paths) |
 
 Typos are caught early: unknown keys and duplicate branch names are rejected when the manifest is loaded, and a profile listed in `bases` that has no directory under `base/` fails the build.
 
@@ -114,27 +117,67 @@ Typos are caught early: unknown keys and duplicate branch names are rejected whe
 
 When files with the same relative path exist in multiple profiles, `common/` has the lowest priority, and profiles listed later in `bases:` take precedence. The later one wins and fully overwrites the file — this is reported via an info log when it occurs.
 
+## Path remapping (`paths`)
+
+By default every file is distributed at the same relative path it has inside its profile. The optional `paths:` mapping in `manifest.yaml` moves files to a different destination for this repository:
+
+```yaml
+paths:
+  pom.xml: services/user/pom.xml       # file entry: moves exactly this file
+  workflows/: .github/workflows/       # directory entry: moves every file under workflows/
+```
+
+- The key (**source**) is the file's distribution path, **after** the `.jinja` suffix is stripped — so templating a file later does not break its remap. The value (**destination**) is the new distribution path, rendered as a Jinja template with the same variables as file templates (`values` / `repo` / `org` — see [Templates](templates.md))
+- A source and destination that **both end in `/`** form a **directory entry**: every file under the source directory moves to the destination directory with its nested structure preserved, so dozens of files need only one line. Mixing a directory on one side with a file on the other is rejected
+- When several entries match the same file, the exact file entry wins over directory entries, and among directory entries the longest (most specific) prefix wins — so you can remap a whole directory while sending one special file somewhere else
+- Sources and destinations must be relative POSIX paths: absolute paths, `.` / `..` / empty segments, and backslashes are rejected when the manifest is loaded. A destination containing Jinja syntax is validated after rendering instead (a value cannot smuggle in `..` or change a file entry into a directory entry)
+- Each file is moved at most once: sources always match the **original** distribution path, and the result of a remap is never remapped again. Swaps (`a: b` plus `b: a`) and chains (`a: b` plus `b: c`) therefore work without cascading, for directories as well as files
+- Collisions fail the build: two files ending up at the same destination path, whether from two remaps or from a remap landing on a file that is not itself remapped
+- [`.ghfanoutignore`](#ghfanoutignore) is unaffected — it matches source names before remapping
+- A source that matches no distributed file in **any** build variant fails the build, so typos are caught early. If a source matches in some variants but not others (e.g. on a branch that overrides `bases`), the remap is skipped there and reported in an info log
+
+Because destinations are templates, one entry combined with per-branch `values` can give each branch a differently named file — without repeating the mapping per branch:
+
+```yaml
+paths:
+  deploy.yml: deploy-{{ values.env }}.yml
+branches:
+  - name: main
+    values: {env: prod}      # distributed as deploy-prod.yml
+  - name: develop
+    values: {env: dev}       # distributed as deploy-dev.yml
+```
+
+Remaps can also be overridden per branch directly — see [Per-branch overrides](#per-branch-overrides) below.
+
 ## Per-branch overrides
 
-By writing an element of `branches:` in object form, you can override the profiles to distribute (`bases`) or the template values (`values`) for just that branch. Strings and objects can be mixed:
+By writing an element of `branches:` in object form, you can override the profiles to distribute (`bases`), the template values (`values`), or the path remaps (`paths`) for just that branch. Strings and objects can be mixed:
 
 ```yaml
 bases:
   - java-service
 values:
   version: "1.0"
+paths:
+  pom.xml: services/user/pom.xml
+  ci.yml: .github/workflows/ci.yml
 branches:
-  - main                    # String = use the top-level bases / values as-is
-  - name: release-1.x       # Object = override bases or values for just this branch
+  - main                    # String = use the top-level bases / values / paths as-is
+  - name: release-1.x       # Object = override bases, values, or paths for just this branch
     bases:
       - java-service-legacy
     values:
       version: "0.9"
+    paths:
+      pom.xml: legacy/pom.xml   # Override the destination for this branch
+      ci.yml: null              # Remove the inherited remap on this branch
 ```
 
-The override semantics differ between `bases` and `values`:
+The override semantics differ between the keys:
 
 - `bases` is a **replacement**: the top-level `bases` is not inherited (explicitly specifying `bases: []` distributes only `common/`)
 - `values` is a **deep merge** (similar to Helm): it is recursively merged key by key into the top-level `values`, inheriting common values while overriding only the differences. Lists are not concatenated — they are replaced wholesale
+- `paths` is a **shallow merge**: entries are merged per source path into the top-level `paths`, and setting a destination to `null` removes the inherited remap for that source on that branch
 
-**Note:** building an overlay that has a per-branch `bases` or `values` override writes output per branch to `<output>/<branch name>/`. See [CLI Reference](cli.md#build) for details.
+**Note:** building an overlay that has a per-branch `bases`, `values`, or `paths` override writes output per branch to `<output>/<branch name>/`. See [CLI Reference](cli.md#build) for details.

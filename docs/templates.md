@@ -16,6 +16,8 @@ Files without the `.jinja` extension are copied as-is, byte for byte. Because re
 
 `repo` and `org` are built-in and always available, even without defining any `values`.
 
+The same three variables are also available in the destinations of `manifest.yaml`'s `paths:` mapping — see [Path remapping](configuration.md#path-remapping-paths).
+
 ## Example
 
 ```xml
