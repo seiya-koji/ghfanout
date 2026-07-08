@@ -484,6 +484,95 @@ class TestPathRemapping:
         with pytest.raises(BuildError, match=re.escape("collides with a file that is not")):
             build_overlay_files(config_repo, manifest, repo="user-service", org="myorg")
 
+    def test_destination_is_rendered_with_values_repo_and_org(self, config_repo: Path) -> None:
+        manifest = Manifest(
+            bases=("java-service",),
+            values={"env": "prod"},
+            paths={"pom.xml": "{{ values.env }}/{{ org }}/{{ repo }}-pom.xml"},
+        )
+
+        result = build_overlay_files(config_repo, manifest, repo="user-service", org="myorg")
+
+        assert result.files["prod/myorg/user-service-pom.xml"] == b"<project/>\n"
+
+    def test_destination_template_supports_default_filter(self, config_repo: Path) -> None:
+        manifest = Manifest(
+            bases=("java-service",),
+            paths={"pom.xml": '{{ values.dir | default("fallback") }}/pom.xml'},
+        )
+
+        result = build_overlay_files(config_repo, manifest, repo="user-service", org="myorg")
+
+        assert result.files["fallback/pom.xml"] == b"<project/>\n"
+
+    def test_directory_destination_is_rendered(self, config_repo: Path) -> None:
+        java_dir = config_repo / "base" / "java-service"
+        (java_dir / "workflows").mkdir()
+        (java_dir / "workflows" / "ci.yml").write_bytes(b"ci\n")
+        manifest = Manifest(
+            bases=("java-service",),
+            values={"env": "prod"},
+            paths={"workflows/": "{{ values.env }}-workflows/"},
+        )
+
+        result = build_overlay_files(config_repo, manifest, repo="user-service", org="myorg")
+
+        assert result.files["prod-workflows/ci.yml"] == b"ci\n"
+
+    def test_raises_build_error_for_undefined_variable_in_destination(
+        self, config_repo: Path
+    ) -> None:
+        manifest = Manifest(bases=("java-service",), paths={"pom.xml": "{{ values.missing }}.xml"})
+
+        with pytest.raises(BuildError, match=re.escape("paths['pom.xml']")):
+            build_overlay_files(config_repo, manifest, repo="user-service", org="myorg")
+
+    def test_raises_build_error_for_template_syntax_error_in_destination(
+        self, config_repo: Path
+    ) -> None:
+        manifest = Manifest(bases=("java-service",), paths={"pom.xml": "{% if %}.xml"})
+
+        with pytest.raises(BuildError, match=re.escape("invalid template syntax")):
+            build_overlay_files(config_repo, manifest, repo="user-service", org="myorg")
+
+    def test_raises_build_error_when_rendered_destination_is_invalid(
+        self, config_repo: Path
+    ) -> None:
+        # A value can smuggle in a ".." segment that static validation cannot see
+        manifest = Manifest(
+            bases=("java-service",),
+            values={"dir": ".."},
+            paths={"pom.xml": "a/{{ values.dir }}/pom.xml"},
+        )
+
+        with pytest.raises(BuildError, match=re.escape("rendered destination")):
+            build_overlay_files(config_repo, manifest, repo="user-service", org="myorg")
+
+    def test_raises_build_error_when_rendering_breaks_entry_symmetry(
+        self, config_repo: Path
+    ) -> None:
+        # A file entry whose rendered destination ends in "/" is rejected
+        manifest = Manifest(
+            bases=("java-service",),
+            values={"name": "dir/"},
+            paths={"pom.xml": "{{ values.name }}"},
+        )
+
+        with pytest.raises(BuildError, match=re.escape("directory to a directory")):
+            build_overlay_files(config_repo, manifest, repo="user-service", org="myorg")
+
+    def test_raises_build_error_when_rendered_destinations_collide(self, config_repo: Path) -> None:
+        java_dir = config_repo / "base" / "java-service"
+        (java_dir / "a.txt").write_bytes(b"A\n")
+        manifest = Manifest(
+            bases=("java-service",),
+            values={"name": "same"},
+            paths={"a.txt": "{{ values.name }}.txt", "pom.xml": "same.txt"},
+        )
+
+        with pytest.raises(BuildError, match=re.escape("both map to 'same.txt'")):
+            build_overlay_files(config_repo, manifest, repo="user-service", org="myorg")
+
 
 class TestVariantKey:
     def test_different_values_yield_different_key_even_with_same_bases(self) -> None:
@@ -695,6 +784,28 @@ class TestBuildPerVariant:
         assert main_build.files["ci.txt"] == b"ci\n"
         release_build = builds[variant_key(manifest, manifest.branches[1])]
         assert release_build.files["workflows/ci.txt"] == b"ci\n"
+
+    def test_branch_values_change_destination_file_name_per_branch(self, config_repo: Path) -> None:
+        # The core use case for templated destinations: one paths entry plus
+        # per-branch values gives each branch a differently named file
+        manifest = Manifest(
+            bases=("java-service",),
+            values={"env": "prod"},
+            paths={"pom.xml": "pom-{{ values.env }}.xml"},
+            branches=(
+                BranchSpec(name="main"),
+                BranchSpec(name="develop", values={"env": "dev"}),
+            ),
+        )
+
+        builds = build_per_variant(config_repo, manifest, repo="user-service", org="myorg")
+
+        assert len(builds) == 2
+        main_build = builds[variant_key(manifest, manifest.branches[0])]
+        assert main_build.files["pom-prod.xml"] == b"<project/>\n"
+        develop_build = builds[variant_key(manifest, manifest.branches[1])]
+        assert develop_build.files["pom-dev.xml"] == b"<project/>\n"
+        assert "pom-prod.xml" not in develop_build.files
 
     def test_raises_build_error_for_unmatched_source_only_in_branch_override(
         self, config_repo: Path

@@ -706,6 +706,33 @@ class TestLoadManifest:
         with pytest.raises(ConfigError, match="relative POSIX path"):
             load_manifest(config_repo, "user-service")
 
+    def test_templated_paths_destination_skips_static_validation(self, config_repo: Path) -> None:
+        # A destination containing Jinja syntax is validated after rendering
+        # (at build time), so even a suspicious-looking template passes parsing
+        overlay_dir = config_repo / "overlays" / "user-service"
+        (overlay_dir / "manifest.yaml").write_text(
+            "bases:\n  - java-service\n"
+            "paths:\n"
+            "  deploy.yml: deploy-{{ values.env }}.yml\n"
+            '  b.yml: "{{ values.dir }}/../b.yml"\n',
+            encoding="utf-8",
+        )
+        manifest = load_manifest(config_repo, "user-service")
+        assert manifest.paths == {
+            "deploy.yml": "deploy-{{ values.env }}.yml",
+            "b.yml": "{{ values.dir }}/../b.yml",
+        }
+
+    def test_symmetry_check_applies_to_templated_destination(self, config_repo: Path) -> None:
+        # The trailing-slash symmetry is judged on the template text itself
+        overlay_dir = config_repo / "overlays" / "user-service"
+        (overlay_dir / "manifest.yaml").write_text(
+            'bases:\n  - java-service\npaths:\n  workflows/: "{{ values.dir }}"\n',
+            encoding="utf-8",
+        )
+        with pytest.raises(ConfigError, match="directory to a"):
+            load_manifest(config_repo, "user-service")
+
 
 class TestListOverlays:
     def test_returns_only_directories_with_manifest_sorted(self, config_repo: Path) -> None:

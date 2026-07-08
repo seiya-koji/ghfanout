@@ -376,20 +376,31 @@ def _parse_values(path: Path, data: dict[str, object]) -> dict[str, object]:
     return _parse_values_mapping(path, data.get("values"), "values")
 
 
-def _validate_remap_path(path: Path, subject: str, value: str) -> None:
-    """Validate a 'paths'-like source or destination as a relative POSIX path.
+def is_valid_remap_path(value: str) -> bool:
+    """Whether value is a valid 'paths' source or destination (a relative POSIX path).
 
     A single trailing slash (marking a directory entry) is allowed; apart from
     that the path must have no empty, '.', or '..' segments, and no
     backslashes. This also rejects a bare "/" (its core is a single empty
-    segment), which would otherwise match every file.
+    segment), which would otherwise match every file. The builder reuses this
+    to validate destinations after Jinja rendering.
     """
     core = value[:-1] if value.endswith("/") else value
-    if "\\" in value or any(segment in ("", ".", "..") for segment in core.split("/")):
+    return "\\" not in value and all(segment not in ("", ".", "..") for segment in core.split("/"))
+
+
+def _validate_remap_path(path: Path, subject: str, value: str) -> None:
+    """Validate a 'paths'-like source or destination, raising ConfigError when invalid."""
+    if not is_valid_remap_path(value):
         raise ConfigError(
             f"{path}: {subject} must be a relative POSIX path"
             f" without backslashes, '.', '..', or empty segments: {value!r}"
         )
+
+
+def _contains_jinja(value: str) -> bool:
+    """Whether value contains Jinja syntax (its path validation happens after rendering)."""
+    return "{{" in value or "{%" in value or "{#" in value
 
 
 def _parse_paths_mapping(
@@ -398,9 +409,12 @@ def _parse_paths_mapping(
     """Validate a 'paths'-like mapping (source path -> destination path) and return it.
 
     A source and destination that both end in "/" form a directory entry;
-    mixing a directory on one side with a file on the other is rejected. A
-    null destination is allowed only when allow_null is True — a branch
-    override uses it to remove an inherited remap.
+    mixing a directory on one side with a file on the other is rejected.
+    Destinations are rendered as Jinja templates at build time, so a
+    destination containing Jinja syntax skips the static path validation here
+    (the rendered result is validated instead). A null destination is allowed
+    only when allow_null is True — a branch override uses it to remove an
+    inherited remap.
     """
     if not isinstance(raw, dict):
         raise ConfigError(f"{path}: '{label}' must be a mapping (key: value).")
@@ -418,7 +432,8 @@ def _parse_paths_mapping(
         elif not isinstance(dest, str):
             raise ConfigError(f"{path}: '{label}' destination for '{source}' must be a string.")
         else:
-            _validate_remap_path(path, f"'{label}' destination for '{source}'", dest)
+            if not _contains_jinja(dest):
+                _validate_remap_path(path, f"'{label}' destination for '{source}'", dest)
             if source.endswith("/") != dest.endswith("/"):
                 raise ConfigError(
                     f"{path}: '{label}' entry for '{source}' must map a directory to a"

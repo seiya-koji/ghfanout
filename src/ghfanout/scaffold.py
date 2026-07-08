@@ -99,10 +99,12 @@ bases:
 #   version: "1.2.3"
 # Remap distribution paths (source -> destination). Sources are matched against the
 # distribution path, after any .jinja suffix is stripped. Entries ending in / on both
-# sides move every file under that directory
+# sides move every file under that directory. Destinations are Jinja templates
+# (values / repo / org), so per-branch values can change a file's name per branch
 # paths:
 #   pom.xml: services/user/pom.xml
 #   workflows/: .github/workflows/
+#   deploy.yml: deploy-{{ values.env }}.yml
 """
 
 

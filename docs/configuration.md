@@ -127,16 +127,28 @@ paths:
   workflows/: .github/workflows/       # directory entry: moves every file under workflows/
 ```
 
-- The key (**source**) is the file's distribution path, **after** the `.jinja` suffix is stripped — so templating a file later does not break its remap. The value (**destination**) is the new distribution path, taken literally
+- The key (**source**) is the file's distribution path, **after** the `.jinja` suffix is stripped — so templating a file later does not break its remap. The value (**destination**) is the new distribution path, rendered as a Jinja template with the same variables as file templates (`values` / `repo` / `org` — see [Templates](templates.md))
 - A source and destination that **both end in `/`** form a **directory entry**: every file under the source directory moves to the destination directory with its nested structure preserved, so dozens of files need only one line. Mixing a directory on one side with a file on the other is rejected
 - When several entries match the same file, the exact file entry wins over directory entries, and among directory entries the longest (most specific) prefix wins — so you can remap a whole directory while sending one special file somewhere else
-- Sources and destinations must be relative POSIX paths: absolute paths, `.` / `..` / empty segments, and backslashes are rejected when the manifest is loaded
+- Sources and destinations must be relative POSIX paths: absolute paths, `.` / `..` / empty segments, and backslashes are rejected when the manifest is loaded. A destination containing Jinja syntax is validated after rendering instead (a value cannot smuggle in `..` or change a file entry into a directory entry)
 - Each file is moved at most once: sources always match the **original** distribution path, and the result of a remap is never remapped again. Swaps (`a: b` plus `b: a`) and chains (`a: b` plus `b: c`) therefore work without cascading, for directories as well as files
 - Collisions fail the build: two files ending up at the same destination path, whether from two remaps or from a remap landing on a file that is not itself remapped
 - [`.ghfanoutignore`](#ghfanoutignore) is unaffected — it matches source names before remapping
 - A source that matches no distributed file in **any** build variant fails the build, so typos are caught early. If a source matches in some variants but not others (e.g. on a branch that overrides `bases`), the remap is skipped there and reported in an info log
 
-Remaps can differ per branch — see [Per-branch overrides](#per-branch-overrides) below.
+Because destinations are templates, one entry combined with per-branch `values` can give each branch a differently named file — without repeating the mapping per branch:
+
+```yaml
+paths:
+  deploy.yml: deploy-{{ values.env }}.yml
+branches:
+  - name: main
+    values: {env: prod}      # distributed as deploy-prod.yml
+  - name: develop
+    values: {env: dev}       # distributed as deploy-dev.yml
+```
+
+Remaps can also be overridden per branch directly — see [Per-branch overrides](#per-branch-overrides) below.
 
 ## Per-branch overrides
 

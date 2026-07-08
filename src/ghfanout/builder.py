@@ -10,7 +10,7 @@ from pathlib import Path
 from jinja2 import Environment, StrictUndefined, TemplateSyntaxError, UndefinedError
 from pathspec import GitIgnoreSpec
 
-from ghfanout.config import IGNORE_FILENAME, BranchSpec, Manifest
+from ghfanout.config import IGNORE_FILENAME, BranchSpec, Manifest, is_valid_remap_path
 from ghfanout.errors import BuildError
 
 logger = logging.getLogger(__name__)
@@ -93,6 +93,44 @@ def _render_templates(
     return result
 
 
+def _render_remap_dest(
+    source: str, dest_template: str, *, repo: str, org: str, values: dict[str, object]
+) -> str:
+    """Render a paths: destination template and validate the result.
+
+    Destinations use the same variables as file templates (values / repo /
+    org). Static path validation happens at manifest load time for plain
+    destinations; the rendered result is (re)validated here because a value
+    can smuggle in '/', '..', or a trailing slash that changes the entry kind.
+    Failures are converted into BuildError.
+    """
+    try:
+        rendered = _TEMPLATE_ENV.from_string(dest_template).render(
+            values=values, repo=repo, org=org
+        )
+    except TemplateSyntaxError as exc:
+        raise BuildError(
+            f"manifest.yaml paths['{source}']: invalid template syntax in destination:"
+            f" {exc.message}"
+        ) from exc
+    except UndefinedError as exc:
+        raise BuildError(
+            f"manifest.yaml paths['{source}']: reference to an undefined variable in"
+            f" destination: {exc.message}"
+        ) from exc
+    if not is_valid_remap_path(rendered):
+        raise BuildError(
+            f"manifest.yaml paths['{source}']: rendered destination {rendered!r} must be a"
+            " relative POSIX path without backslashes, '.', '..', or empty segments."
+        )
+    if source.endswith("/") != rendered.endswith("/"):
+        raise BuildError(
+            f"manifest.yaml paths['{source}']: rendered destination {rendered!r} must map a"
+            " directory to a directory (both ending in '/') or a file to a file."
+        )
+    return rendered
+
+
 def _resolve_remap(rel_path: str, paths: dict[str, str]) -> tuple[str, str] | None:
     """Resolve the paths: entry matching rel_path.
 
@@ -118,32 +156,44 @@ def _resolve_remap(rel_path: str, paths: dict[str, str]) -> tuple[str, str] | No
 
 
 def _apply_path_remaps(
-    files: dict[str, bytes], paths: dict[str, str]
+    files: dict[str, bytes],
+    paths: dict[str, str],
+    *,
+    repo: str,
+    org: str,
+    values: dict[str, object],
 ) -> tuple[dict[str, bytes], frozenset[str]]:
     """Apply the manifest's paths: remaps to the rendered file set.
 
-    Sources match the distribution path (after the .jinja suffix is stripped):
-    a plain source matches exactly one file, and a source ending in "/"
-    matches every file under that directory, moving it to the destination
-    directory with its structure preserved. Each file is moved at most once —
-    matching is against the original path, never against the result of
-    another remap — so swaps (a -> b, b -> a) and chains (a -> b, b -> c) are
-    fine, for directories as well as files.
+    Destinations are first rendered as Jinja templates (values / repo / org),
+    so combined with per-branch values a distributed file's name can differ
+    per branch. Sources match the distribution path (after the .jinja suffix
+    is stripped): a plain source matches exactly one file, and a source ending
+    in "/" matches every file under that directory, moving it to the
+    destination directory with its structure preserved. Each file is moved at
+    most once — matching is against the original path, never against the
+    result of another remap — so swaps (a -> b, b -> a) and chains (a -> b,
+    b -> c) are fine, for directories as well as files.
 
     Returns:
         The remapped files, and the sources that matched no file (judged
         across variants by build_per_variant, not an error here).
 
     Raises:
-        BuildError: If two files would end up at the same distribution path.
+        BuildError: If a destination fails to render or is invalid after
+            rendering, or two files would end up at the same distribution path.
     """
     if not paths:
         return files, frozenset()
+    rendered_paths = {
+        source: _render_remap_dest(source, dest, repo=repo, org=org, values=values)
+        for source, dest in paths.items()
+    }
     matched_sources: set[str] = set()
     matched_files: set[str] = set()
     new_paths: dict[str, str] = {}
     for rel_path in files:
-        resolved = _resolve_remap(rel_path, paths)
+        resolved = _resolve_remap(rel_path, rendered_paths)
         if resolved is None:
             new_paths[rel_path] = rel_path
             continue
@@ -244,7 +294,9 @@ def build_overlay_files(
             origins[rel_path] = profile
 
     rendered = _render_templates(files, repo=repo, org=org, values=manifest.values)
-    remapped, unmatched = _apply_path_remaps(rendered, manifest.paths)
+    remapped, unmatched = _apply_path_remaps(
+        rendered, manifest.paths, repo=repo, org=org, values=manifest.values
+    )
     return BuildResult(files=remapped, unmatched_path_sources=unmatched)
 
 
