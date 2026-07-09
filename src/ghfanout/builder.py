@@ -335,7 +335,7 @@ def variant_key(manifest: Manifest, spec: BranchSpec) -> BuildVariantKey:
 def build_per_variant(
     config_root: Path, manifest: Manifest, *, repo: str, org: str
 ) -> dict[BuildVariantKey, BuildResult]:
-    """Build each unique combination of effective (bases, values, paths) per branch exactly once.
+    """Build each unique combination of (bases, values, paths, excludes) per branch exactly once.
 
     When branches is omitted (default branch only), build just the one
     top-level combination.
