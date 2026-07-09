@@ -334,6 +334,23 @@ class TestBuildCommand:
             in result.stdout
         )
 
+    def test_default_line_pluralizes_multiple_overrides(
+        self, config_repo: Path, tmp_path: Path
+    ) -> None:
+        # A second file (besides .gitignore) overriding common with java-service
+        (config_repo / "base" / "java-service" / ".github").mkdir()
+        (config_repo / "base" / "java-service" / ".github" / "CODEOWNERS").write_bytes(
+            b"* @myorg/java\n"
+        )
+        output_dir = tmp_path / "out"
+
+        result = runner.invoke(
+            app, ["-C", str(config_repo), "build", "user-service", "-o", str(output_dir)]
+        )
+
+        assert result.exit_code == 0, result.output
+        assert f"user-service -> {output_dir} (3 files: 2 overrides)" in result.stdout
+
     def test_detail_lists_every_file_with_provenance_notes(
         self, config_repo: Path, tmp_path: Path
     ) -> None:

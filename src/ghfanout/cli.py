@@ -191,13 +191,21 @@ def _build_one(
 
 
 def _transform_counts(provenance: dict[str, FileProvenance]) -> str:
-    """Summarize transformations as ': 1 rendered, 2 remapped, 1 override', or ''."""
+    """Summarize transformations as ': 1 rendered, 2 remapped, 2 overrides', or ''."""
     counts = (
-        (sum(1 for prov in provenance.values() if prov.rendered), "rendered"),
-        (sum(1 for prov in provenance.values() if prov.remapped_from is not None), "remapped"),
-        (sum(1 for prov in provenance.values() if prov.overrides is not None), "override"),
+        (sum(1 for prov in provenance.values() if prov.rendered), "rendered", "rendered"),
+        (
+            sum(1 for prov in provenance.values() if prov.remapped_from is not None),
+            "remapped",
+            "remapped",
+        ),
+        (
+            sum(1 for prov in provenance.values() if prov.overrides is not None),
+            "override",
+            "overrides",
+        ),
     )
-    parts = [f"{count} {label}" for count, label in counts if count]
+    parts = [_plural(count, singular, plural) for count, singular, plural in counts if count]
     return f": {', '.join(parts)}" if parts else ""
 
 
