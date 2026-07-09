@@ -26,23 +26,47 @@ HTTP_UNPROCESSABLE_ENTITY = 422
 
 
 @dataclass(frozen=True)
+class FileChange:
+    """A single file that differs between the build result and the target branch.
+
+    Attributes:
+        path: Distribution path of the file.
+        old: The file's current content on the branch, or None when the file
+            does not yet exist there (a newly added file).
+        new: The file's content in the build result.
+    """
+
+    path: str
+    old: bytes | None
+    new: bytes
+
+
+@dataclass(frozen=True)
 class BranchDiff:
     """Diff for a single target branch.
 
     Attributes:
         branch: Target branch name.
-        added: Relative paths that do not yet exist on the branch.
-        updated: Relative paths whose content differs from the build result.
+        changes: Per-file changes (added or updated), in distribution-path order.
     """
 
     branch: str
-    added: tuple[str, ...]
-    updated: tuple[str, ...]
+    changes: tuple[FileChange, ...] = ()
+
+    @property
+    def added(self) -> tuple[str, ...]:
+        """Paths that do not yet exist on the branch, in distribution-path order."""
+        return tuple(change.path for change in self.changes if change.old is None)
+
+    @property
+    def updated(self) -> tuple[str, ...]:
+        """Paths whose content differs from the build result, in distribution-path order."""
+        return tuple(change.path for change in self.changes if change.old is not None)
 
     @property
     def has_changes(self) -> bool:
         """Whether there is at least one file to add or update."""
-        return bool(self.added or self.updated)
+        return bool(self.changes)
 
 
 @dataclass(frozen=True)
@@ -83,14 +107,13 @@ def compute_branch_diff(repo: Repository, branch: str, build: BuildResult) -> Br
         DeployError: If a build output path conflicts with an existing
             directory on the branch.
     """
-    added: list[str] = []
-    updated: list[str] = []
+    changes: list[FileChange] = []
     for rel_path, content in sorted(build.files.items()):
         try:
             current = repo.get_contents(rel_path, ref=branch)
         except GithubException as exc:
             if exc.status == HTTP_NOT_FOUND:
-                added.append(rel_path)
+                changes.append(FileChange(path=rel_path, old=None, new=content))
                 continue
             raise
         if isinstance(current, list):
@@ -98,8 +121,8 @@ def compute_branch_diff(repo: Repository, branch: str, build: BuildResult) -> Br
                 f"{repo.full_name}@{branch}: {rel_path} conflicts with an existing directory."
             )
         if current.decoded_content != content:
-            updated.append(rel_path)
-    return BranchDiff(branch=branch, added=tuple(added), updated=tuple(updated))
+            changes.append(FileChange(path=rel_path, old=current.decoded_content, new=content))
+    return BranchDiff(branch=branch, changes=tuple(changes))
 
 
 def _create_commit(

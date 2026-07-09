@@ -158,6 +158,31 @@ class TestDeployOverlayApiCalls:
         assert outcome.pr_url == "https://github.com/myorg/user-service/pull/1"
         assert outcome.is_pr_reused is False
 
+    def test_diff_captures_old_and_new_content_of_each_change(self, config_repo: Path) -> None:
+        # CODEOWNERS: identical (excluded) / .gitignore: differs (updated) / pom.xml: new
+        repo = make_fake_repo(
+            existing_files={
+                (".github/CODEOWNERS", "main"): b"* @myorg/platform\n",
+                (".gitignore", "main"): b"*.log\n",
+            }
+        )
+        gh = make_fake_gh(repo)
+
+        outcomes = deploy_overlay(config_repo, ROOT_CONFIG, "user-service", gh, dry_run=True)
+
+        changes = {change.path: change for change in outcomes[0].diff.changes}
+        # a new file has old=None and carries the built content
+        assert changes["pom.xml"].old is None
+        assert changes["pom.xml"].new == b"<project/>\n"
+        # an updated file keeps both the branch's current content and the built content
+        assert changes[".gitignore"].old == b"*.log\n"
+        assert changes[".gitignore"].new == b"target/\n"
+        # an identical file is not part of the diff at all
+        assert ".github/CODEOWNERS" not in changes
+        # the added / updated properties are still derived from changes
+        assert outcomes[0].diff.added == ("pom.xml",)
+        assert outcomes[0].diff.updated == (".gitignore",)
+
     def test_targets_default_branch_when_branches_omitted(self, config_repo: Path) -> None:
         repo = make_fake_repo(default_branch="develop", existing_files={})
         gh = make_fake_gh(repo)

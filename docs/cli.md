@@ -104,10 +104,11 @@ With `--json`, stdout carries a single JSON report instead of the human-readable
 Compare the build result against the target repository's current state, and open a PR (or push directly) only if there is a diff:
 
 ```bash
-ghfanout deploy user-service --dry-run   # Show only the diff, change nothing (safety check)
-ghfanout deploy user-service             # Create branch ghfanout/update-<branch> and open a PR
-ghfanout deploy --all                    # Deploy to all repositories under overlays/
-ghfanout deploy --all --json             # Print a machine-readable JSON report instead (for CI or chat integrations)
+ghfanout deploy user-service --dry-run              # Show only the diff, change nothing (safety check)
+ghfanout deploy user-service --dry-run --show-diff  # Also print a unified diff of each changed file
+ghfanout deploy user-service                        # Create branch ghfanout/update-<branch> and open a PR
+ghfanout deploy --all                               # Deploy to all repositories under overlays/
+ghfanout deploy --all --json                        # Print a machine-readable JSON report instead (for CI or chat integrations)
 ```
 
 Requires authentication — see [Authentication](authentication.md). Specify either an overlay name or `--all` (not both).
@@ -182,6 +183,32 @@ With `--json`, stdout carries a single JSON report instead of the human-readable
   }
 }
 ```
+
+### Showing file diffs
+
+Add `--show-diff` to print a unified diff of every changed file's contents, on top of the per-file `+`/`~` lines. It pairs naturally with `--dry-run` to preview exactly what a deploy would change:
+
+```text
+[dry-run] myorg/user-service@main:
+  + pom.xml (new)
+  ~ .gitignore (updated)
+--- /dev/null
++++ b/pom.xml
+@@ -0,0 +1 @@
++<project/>
+--- a/.gitignore
++++ b/.gitignore
+@@ -1,3 +1,3 @@
+ target/
+ build/
+-*.log
++*.class
+```
+
+- Added lines are shown in green, removed lines in red, and hunk headers in cyan
+- A newly added file uses `/dev/null` as its `from` header
+- Binary files (content that is not valid UTF-8) are reported as `Binary file (diff not shown)` instead of a diff
+- `--show-diff` augments the human-readable output, so it cannot be combined with `--json`
 
 ### push mode
 

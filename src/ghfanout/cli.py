@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import difflib
 import json
 import logging
 import shutil
@@ -28,7 +29,7 @@ from ghfanout.config import (
     load_manifest,
     load_root_config,
 )
-from ghfanout.deploy import BranchOutcome, deploy_overlay
+from ghfanout.deploy import BranchOutcome, FileChange, deploy_overlay
 from ghfanout.errors import ConfigError, GhfanoutError
 from ghfanout.github_client import create_github_client
 from ghfanout.scaffold import EXAMPLE_OVERLAY, init_config_repo
@@ -362,7 +363,41 @@ def build(
         raise _fail(f"Build failed for {len(failed)} repository(ies): {', '.join(failed)}")
 
 
-def _report_outcome(target: str, outcome: BranchOutcome) -> None:
+def _diff_line_color(line: str) -> str | None:
+    """Return the color for a unified-diff line, or None for unchanged context lines."""
+    if line.startswith("+"):
+        return typer.colors.GREEN
+    if line.startswith("-"):
+        return typer.colors.RED
+    if line.startswith("@"):
+        return typer.colors.CYAN
+    return None
+
+
+def _echo_file_diff(change: FileChange) -> None:
+    """Print a colored unified diff for a single changed file.
+
+    A file whose content is not valid UTF-8 (a binary file) is reported with a
+    single note instead of a diff.
+    """
+    try:
+        old_text = "" if change.old is None else change.old.decode("utf-8")
+        new_text = change.new.decode("utf-8")
+    except UnicodeDecodeError:
+        typer.echo(f"  {change.path}: Binary file (diff not shown)")
+        return
+    diff = difflib.unified_diff(
+        old_text.splitlines(),
+        new_text.splitlines(),
+        fromfile="/dev/null" if change.old is None else f"a/{change.path}",
+        tofile=f"b/{change.path}",
+        lineterm="",
+    )
+    for line in diff:
+        typer.secho(line, fg=_diff_line_color(line))
+
+
+def _report_outcome(target: str, outcome: BranchOutcome, *, show_diff: bool) -> None:
     """Display the deploy result for a single target branch."""
     if not outcome.diff.has_changes:
         typer.echo(f"{target}: no changes")
@@ -374,6 +409,9 @@ def _report_outcome(target: str, outcome: BranchOutcome) -> None:
         typer.echo(f"  + {path} (new)")
     for path in outcome.diff.updated:
         typer.echo(f"  ~ {path} (updated)")
+    if show_diff:
+        for change in outcome.diff.changes:
+            _echo_file_diff(change)
     if outcome.pr_url is not None:
         label = "Updated existing PR" if outcome.is_pr_reused else "Created PR"
         typer.echo(f"  => {label}: {outcome.pr_url}")
@@ -381,10 +419,12 @@ def _report_outcome(target: str, outcome: BranchOutcome) -> None:
         typer.echo(f"  => Pushed directly: {outcome.pushed_commit_sha}")
 
 
-def _report_outcomes(repo_full_name: str, outcomes: list[BranchOutcome]) -> None:
+def _report_outcomes(
+    repo_full_name: str, outcomes: list[BranchOutcome], *, show_diff: bool
+) -> None:
     """Display the deploy results for every target branch of a repository."""
     for outcome in outcomes:
-        _report_outcome(f"{repo_full_name}@{outcome.branch}", outcome)
+        _report_outcome(f"{repo_full_name}@{outcome.branch}", outcome, show_diff=show_diff)
 
 
 def _classify_outcome(outcome: BranchOutcome) -> str:
@@ -502,6 +542,10 @@ def deploy(
     dry_run: Annotated[
         bool, typer.Option("--dry-run", help="Show the diff only, without creating a PR or pushing")
     ] = False,
+    show_diff: Annotated[
+        bool,
+        typer.Option("--show-diff", help="Show a unified diff of each changed file's contents"),
+    ] = False,
     json_output: Annotated[bool, typer.Option("--json", help=_JSON_OPTION_HELP)] = False,
 ) -> None:
     """Compare the build output against each branch of the target repo and open a PR if it differs.
@@ -510,6 +554,8 @@ def deploy(
     """
     if (overlay is None) == (not deploy_all):
         raise _fail("Specify either an overlay name or --all.")
+    if show_diff and json_output:
+        raise _fail("--show-diff cannot be combined with --json (it augments the text output).")
 
     try:
         config_root = _resolve_config_root(ctx.obj)
@@ -532,7 +578,7 @@ def deploy(
             continue
         deployed[name] = outcomes
         if not json_output:
-            _report_outcomes(f"{root_config.org}/{name}", outcomes)
+            _report_outcomes(f"{root_config.org}/{name}", outcomes, show_diff=show_diff)
 
     if json_output:
         report = _deploy_report(root_config.org, deployed, failed, dry_run=dry_run)
