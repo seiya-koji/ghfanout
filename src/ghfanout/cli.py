@@ -364,7 +364,9 @@ def build(
 
 
 def _diff_line_color(line: str) -> str | None:
-    """Return the color for a unified-diff line, or None for unchanged context lines."""
+    """Return the color for a unified-diff line, or None for unchanged context and file headers."""
+    if line.startswith(("--- ", "+++ ")):
+        return None
     if line.startswith("+"):
         return typer.colors.GREEN
     if line.startswith("-"):

@@ -51,7 +51,7 @@ class BranchDiff:
     """
 
     branch: str
-    changes: tuple[FileChange, ...] = ()
+    changes: tuple[FileChange, ...]
 
     @property
     def added(self) -> tuple[str, ...]:
