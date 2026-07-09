@@ -1,6 +1,6 @@
 [project]
 name = "ghfanout"
-version = "0.3.0"
+version = "0.4.0"
 description = "Configuration-as-Code for many GitHub repositories: manage shared config files in one place and fan them out as pull requests, using a Kustomize-like base/overlay structure"
 readme = "README.md"
 authors = [

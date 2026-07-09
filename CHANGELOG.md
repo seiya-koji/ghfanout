@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.0](https://github.com/seiya-koji/ghfanout/compare/v0.3.0...v0.4.0) (2026-07-09)
+
+
+### Features
+
+* add build/deploy summaries with --detail and --json reports ([#13](https://github.com/seiya-koji/ghfanout/issues/13)) ([5ccd6a8](https://github.com/seiya-koji/ghfanout/commit/5ccd6a875712050ccda4ec8495c8d516a9a195bf))
+* **config:** add manifest excludes for branch-scoped exclusion ([#12](https://github.com/seiya-koji/ghfanout/issues/12)) ([83aacf7](https://github.com/seiya-koji/ghfanout/commit/83aacf79d92fad09acfdb07128e938da59d923b3))
+* **deploy:** add --show-diff to print unified diffs of changed files ([#14](https://github.com/seiya-koji/ghfanout/issues/14)) ([82dfddf](https://github.com/seiya-koji/ghfanout/commit/82dfddfc7f789a8ea1046e2c61cb98f7f44a8dc1))
+
 ## [0.3.0](https://github.com/seiya-koji/ghfanout/compare/v0.2.0...v0.3.0) (2026-07-08)
 
 
