@@ -162,6 +162,52 @@ class TestGhfanoutIgnore:
         assert result.files[".ghfanoutignore"] == b"pom.xml\n"
 
 
+class TestExcludes:
+    def test_excludes_files_matching_manifest_pattern(self, config_repo: Path) -> None:
+        result = build_overlay_files(
+            config_repo,
+            Manifest(bases=("java-service",), excludes=("pom.xml",)),
+            repo="user-service",
+            org="myorg",
+        )
+
+        assert "pom.xml" not in result.files
+        assert ".github/CODEOWNERS" in result.files  # unrelated files are still distributed
+
+    def test_supports_gitignore_wildcards_and_negation(self, config_repo: Path) -> None:
+        common_docs = config_repo / "base" / "common" / "docs"
+        common_docs.mkdir()
+        (common_docs / "internal.md").write_bytes(b"internal\n")
+        (common_docs / "keep.md").write_bytes(b"keep\n")
+
+        result = build_overlay_files(
+            config_repo,
+            Manifest(excludes=("docs/", "!docs/keep.md")),
+            repo="user-service",
+            org="myorg",
+        )
+
+        assert "docs/internal.md" not in result.files
+        assert result.files["docs/keep.md"] == b"keep\n"
+
+    def test_evaluated_independently_of_ghfanoutignore(self, config_repo: Path) -> None:
+        # Both mechanisms can exclude the same or different files without
+        # error; a manifest exclude does not need to also appear in
+        # .ghfanoutignore, and vice versa
+        (config_repo / ".ghfanoutignore").write_text(".gitignore\n", encoding="utf-8")
+
+        result = build_overlay_files(
+            config_repo,
+            Manifest(bases=("java-service",), excludes=("pom.xml",)),
+            repo="user-service",
+            org="myorg",
+        )
+
+        assert "pom.xml" not in result.files  # excluded by manifest excludes
+        assert ".gitignore" not in result.files  # excluded by .ghfanoutignore
+        assert ".github/CODEOWNERS" in result.files
+
+
 class TestTemplateRendering:
     def test_jinja_is_rendered_and_distributed_without_extension(self, config_repo: Path) -> None:
         java_dir = config_repo / "base" / "java-service"
@@ -662,6 +708,33 @@ class TestVariantKey:
             manifest, manifest.branches[1]
         )
 
+    def test_different_excludes_yield_different_key_even_with_same_bases_and_values(self) -> None:
+        manifest = Manifest(
+            bases=("java-service",),
+            excludes=("drafts/",),
+            branches=(
+                BranchSpec(name="main"),
+                BranchSpec(name="release-1.x", excludes=("legacy/pom.xml",)),
+            ),
+        )
+        assert variant_key(manifest, manifest.branches[0]) != variant_key(
+            manifest, manifest.branches[1]
+        )
+
+    def test_same_effective_excludes_yield_same_key(self) -> None:
+        manifest = Manifest(
+            bases=("java-service",),
+            excludes=("drafts/",),
+            branches=(
+                BranchSpec(name="main"),
+                # An empty branch override is a no-op (union with nothing added)
+                BranchSpec(name="develop", excludes=()),
+            ),
+        )
+        assert variant_key(manifest, manifest.branches[0]) == variant_key(
+            manifest, manifest.branches[1]
+        )
+
 
 class TestBuildPerVariant:
     def test_builds_only_unique_variants(self, config_repo: Path) -> None:
@@ -821,6 +894,58 @@ class TestBuildPerVariant:
         )
 
         with pytest.raises(BuildError, match=re.escape("typo.txt")):
+            build_per_variant(config_repo, manifest, repo="user-service", org="myorg")
+
+    def test_branch_excludes_only_apply_to_that_branchs_variant(self, config_repo: Path) -> None:
+        # Branch-scoped exclusion: release-1.x should not receive pom.xml, but
+        # main (no override) still does — excludes is additive, not global
+        manifest = Manifest(
+            bases=("java-service",),
+            branches=(
+                BranchSpec(name="main"),
+                BranchSpec(name="release-1.x", excludes=("pom.xml",)),
+            ),
+        )
+
+        builds = build_per_variant(config_repo, manifest, repo="user-service", org="myorg")
+
+        main_build = builds[variant_key(manifest, manifest.branches[0])]
+        assert "pom.xml" in main_build.files
+        release_build = builds[variant_key(manifest, manifest.branches[1])]
+        assert "pom.xml" not in release_build.files
+
+    def test_excluded_source_is_unmatched_only_in_its_own_variant(self, config_repo: Path) -> None:
+        # pom.xml is excluded (and thus unremapped) only on release-1.x; main
+        # still matches the paths source, so the build as a whole succeeds
+        manifest = Manifest(
+            bases=("java-service",),
+            paths={"pom.xml": "services/pom.xml"},
+            branches=(
+                BranchSpec(name="main"),
+                BranchSpec(name="release-1.x", excludes=("pom.xml",)),
+            ),
+        )
+
+        builds = build_per_variant(config_repo, manifest, repo="user-service", org="myorg")
+
+        main_build = builds[variant_key(manifest, manifest.branches[0])]
+        assert main_build.files["services/pom.xml"] == b"<project/>\n"
+        release_build = builds[variant_key(manifest, manifest.branches[1])]
+        assert "services/pom.xml" not in release_build.files
+        assert "pom.xml" not in release_build.files
+
+    def test_raises_build_error_when_excludes_removes_paths_source_everywhere(
+        self, config_repo: Path
+    ) -> None:
+        # excludes: is applied before paths:, so a source excluded in every
+        # variant it applies to matches nowhere — the same error as a typo
+        manifest = Manifest(
+            bases=("java-service",),
+            excludes=("pom.xml",),
+            paths={"pom.xml": "services/pom.xml"},
+        )
+
+        with pytest.raises(BuildError, match=re.escape("pom.xml")):
             build_per_variant(config_repo, manifest, repo="user-service", org="myorg")
 
 

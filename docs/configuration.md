@@ -101,6 +101,8 @@ values:                # Values referenced from templates (*.jinja) (optional, c
   version: "1.2.3"
 paths:                 # Remap distribution paths (optional, see Path remapping below)
   pom.xml: services/user/pom.xml
+excludes:              # Exclude files for this repository (optional, see Exclude files below)
+  - internal-notes.md
 ```
 
 | Key | Required | Description |
@@ -110,6 +112,7 @@ paths:                 # Remap distribution paths (optional, see Path remapping 
 | `deploy_mode` | | Overrides `ghfanout.yaml`'s `deploy_mode` for this repository only |
 | `values` | | Values referenced from templates; can be nested. See [Templates](templates.md) |
 | `paths` | | Remaps distribution paths (source → destination) for this repository. See [Path remapping](#path-remapping-paths) |
+| `excludes` | | Excludes files from distribution for this repository (or one branch of it). See [Exclude files](#exclude-files-excludes) |
 
 Typos are caught early: unknown keys and duplicate branch names are rejected when the manifest is loaded, and a profile listed in `bases` that has no directory under `base/` fails the build.
 
@@ -150,9 +153,24 @@ branches:
 
 Remaps can also be overridden per branch directly — see [Per-branch overrides](#per-branch-overrides) below.
 
+## Exclude files (`excludes`)
+
+`.ghfanoutignore` excludes files across the **entire config repository**, for every overlay and every branch. When only one repository — or one branch of one repository — must not receive a file that every other repository does need, use the manifest's `excludes:` instead:
+
+```yaml
+excludes:
+  - internal-notes.md
+  - drafts/
+```
+
+- Syntax and matching point are identical to [`.ghfanoutignore`](#ghfanoutignore): `.gitignore`-compatible patterns (including `!` negation and trailing-slash directory matches), matched against each file's path relative to its profile directory, on the source name before the `.jinja` suffix is stripped
+- `excludes:` is evaluated independently of `.ghfanoutignore` — a file is excluded if either one matches, but their `!` negations cannot interact with each other
+- Per-branch `excludes` (see [Per-branch overrides](#per-branch-overrides)) are **added to** the top-level `excludes`, not a replacement — a branch's own patterns are appended after the top-level ones, so a branch can write `!pattern` to re-include something the top level excludes
+- An excluded file never enters the file set to distribute, so it is also unaffected by [Path remapping](#path-remapping-paths). If a `paths:` source is excluded in every build variant it would otherwise apply to, the build fails with the same "matched no distributed file" error as a typo'd source
+
 ## Per-branch overrides
 
-By writing an element of `branches:` in object form, you can override the profiles to distribute (`bases`), the template values (`values`), or the path remaps (`paths`) for just that branch. Strings and objects can be mixed:
+By writing an element of `branches:` in object form, you can override the profiles to distribute (`bases`), the template values (`values`), the path remaps (`paths`), or the exclude patterns (`excludes`) for just that branch. Strings and objects can be mixed:
 
 ```yaml
 bases:
@@ -162,9 +180,11 @@ values:
 paths:
   pom.xml: services/user/pom.xml
   ci.yml: .github/workflows/ci.yml
+excludes:
+  - drafts/
 branches:
-  - main                    # String = use the top-level bases / values / paths as-is
-  - name: release-1.x       # Object = override bases, values, or paths for just this branch
+  - main                    # String = use the top-level bases / values / paths / excludes as-is
+  - name: release-1.x       # Object = override bases, values, paths, or excludes for just this branch
     bases:
       - java-service-legacy
     values:
@@ -172,6 +192,8 @@ branches:
     paths:
       pom.xml: legacy/pom.xml   # Override the destination for this branch
       ci.yml: null              # Remove the inherited remap on this branch
+    excludes:
+      - legacy/pom.xml          # Added on top of the top-level excludes (drafts/ still applies)
 ```
 
 The override semantics differ between the keys:
@@ -179,5 +201,6 @@ The override semantics differ between the keys:
 - `bases` is a **replacement**: the top-level `bases` is not inherited (explicitly specifying `bases: []` distributes only `common/`)
 - `values` is a **deep merge** (similar to Helm): it is recursively merged key by key into the top-level `values`, inheriting common values while overriding only the differences. Lists are not concatenated — they are replaced wholesale
 - `paths` is a **shallow merge**: entries are merged per source path into the top-level `paths`, and setting a destination to `null` removes the inherited remap for that source on that branch
+- `excludes` is a **union**: the branch's patterns are appended after the top-level `excludes`, never removing them (see [Exclude files](#exclude-files-excludes))
 
-**Note:** building an overlay that has a per-branch `bases`, `values`, or `paths` override writes output per branch to `<output>/<branch name>/`. See [CLI Reference](cli.md#build) for details.
+**Note:** building an overlay that has a per-branch `bases`, `values`, `paths`, or `excludes` override writes output per branch to `<output>/<branch name>/`. See [CLI Reference](cli.md#build) for details.

@@ -82,12 +82,17 @@ class BranchSpec:
         paths: Branch-specific path remaps; None uses the top-level paths
             as-is, otherwise shallow-merged into them (a null destination
             removes the inherited remap for that source).
+        excludes: Branch-specific exclude patterns; None means no branch
+            override (the top-level excludes apply as-is). Otherwise these
+            patterns are added to the top-level excludes (a union, not a
+            replacement).
     """
 
     name: str
     bases: tuple[str, ...] | None = None
     values: dict[str, object] | None = None
     paths: dict[str, str | None] | None = None
+    excludes: tuple[str, ...] | None = None
 
 
 def _deep_merge(base: dict[str, object], override: dict[str, object]) -> dict[str, object]:
@@ -122,6 +127,10 @@ class Manifest:
         paths: Distribution path remaps (source -> destination). Sources are
             matched against the distribution path, after the .jinja suffix is
             stripped.
+        excludes: Exclude patterns (.gitignore syntax, same as
+            .ghfanoutignore) scoped to this overlay, matched at the same
+            point as .ghfanoutignore (the profile-relative path, before the
+            .jinja suffix is stripped).
     """
 
     bases: tuple[str, ...] = ()
@@ -129,6 +138,7 @@ class Manifest:
     deploy_mode: DeployMode | None = None
     values: dict[str, object] = field(default_factory=dict)
     paths: dict[str, str] = field(default_factory=dict)
+    excludes: tuple[str, ...] = ()
 
     def bases_for(self, spec: BranchSpec) -> tuple[str, ...]:
         """Effective bases for the branch (inherited when there is no branch override)."""
@@ -152,11 +162,30 @@ class Manifest:
         merged: dict[str, str | None] = {**self.paths, **spec.paths}
         return {source: dest for source, dest in merged.items() if dest is not None}
 
+    def excludes_for(self, spec: BranchSpec) -> tuple[str, ...]:
+        """Effective excludes for the branch (branch excludes added to the top-level ones).
+
+        Unlike paths (per-source override), excludes is a union: the branch
+        patterns are appended after the top-level ones, never removing them.
+        Order is preserved (not deduplicated as a set) because .gitignore
+        syntax is order-sensitive — a branch can write a '!pattern' to negate
+        a top-level exclude.
+        """
+        if spec.excludes is None:
+            return self.excludes
+        return self.excludes + spec.excludes
+
     @property
     def has_branch_specific_build(self) -> bool:
-        """Whether any branch overrides bases, values, or paths (needs a branch-specific build)."""
+        """Whether any branch overrides bases, values, paths, or excludes.
+
+        A branch-specific build is needed when this is true.
+        """
         return any(
-            spec.bases is not None or spec.values is not None or spec.paths is not None
+            spec.bases is not None
+            or spec.values is not None
+            or spec.paths is not None
+            or spec.excludes is not None
             for spec in self.branches
         )
 
@@ -305,7 +334,7 @@ def _parse_bases(path: Path, raw: object, label: str) -> tuple[str, ...]:
 
 
 # Keys allowed on object elements of branches: (unknown keys are rejected to catch typos)
-_BRANCH_SPEC_KEYS = frozenset({"name", "bases", "values", "paths"})
+_BRANCH_SPEC_KEYS = frozenset({"name", "bases", "values", "paths", "excludes"})
 
 
 def _parse_branch_spec(path: Path, item: object) -> BranchSpec:
@@ -335,7 +364,12 @@ def _parse_branch_spec(path: Path, item: object) -> BranchSpec:
             if "paths" in item
             else None
         )
-        return BranchSpec(name=name, bases=bases, values=values, paths=paths)
+        excludes = (
+            _parse_bases(path, item["excludes"], "branches[].excludes")
+            if "excludes" in item
+            else None
+        )
+        return BranchSpec(name=name, bases=bases, values=values, paths=paths, excludes=excludes)
     raise ConfigError(
         f"{path}: a 'branches' element must be either a branch name string or a "
         "mapping with name / bases."
@@ -472,6 +506,7 @@ def load_manifest(config_root: Path, overlay: str) -> Manifest:
         deploy_mode=_parse_deploy_mode(path, data),
         values=_parse_values(path, data),
         paths=_parse_paths(path, data),
+        excludes=_parse_bases(path, data.get("excludes", []), "excludes"),
     )
 
 

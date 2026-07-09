@@ -244,9 +244,12 @@ def build_overlay_files(
     Precedence is lowest for common, and increases for profiles listed later
     in bases: (the same relative path is fully overwritten by the later one,
     and an info log records the override). Files matched by the config
-    repository's .ghfanoutignore are excluded before composition. After
-    composition, *.jinja files are rendered and lose their extension, then the
-    manifest's paths: remaps are applied to the resulting distribution paths.
+    repository's .ghfanoutignore, or by the manifest's excludes: (already
+    resolved to its effective per-branch value by the caller), are excluded
+    before composition — the two are evaluated as independent gitignore specs
+    so their '!' negations cannot interact. After composition, *.jinja files
+    are rendered and lose their extension, then the manifest's paths: remaps
+    are applied to the resulting distribution paths.
 
     Args:
         config_root: Config repository root.
@@ -261,6 +264,7 @@ def build_overlay_files(
         BuildError: If a profile is missing or a template fails to render.
     """
     ignore_spec = _load_ignore_spec(config_root)
+    exclude_spec = GitIgnoreSpec.from_lines(manifest.excludes)
 
     # Process each profile only once even if specified multiple times (order preserved)
     profiles = list(dict.fromkeys([COMMON_PROFILE, *manifest.bases]))
@@ -283,6 +287,9 @@ def build_overlay_files(
             if ignore_spec.match_file(rel_path):
                 logger.debug("%s: excluded by %s", rel_path, IGNORE_FILENAME)
                 continue
+            if exclude_spec.match_file(rel_path):
+                logger.debug("%s: excluded by manifest.yaml excludes", rel_path)
+                continue
             if rel_path in files:
                 logger.info(
                     "%s: overriding base/%s with base/%s",
@@ -300,9 +307,9 @@ def build_overlay_files(
     return BuildResult(files=remapped, unmatched_path_sources=unmatched)
 
 
-# Key identifying a unique combination of build inputs (bases, values, and paths)
-# effective for a branch.
-BuildVariantKey = tuple[tuple[str, ...], Hashable, Hashable]
+# Key identifying a unique combination of build inputs (bases, values, paths,
+# and excludes) effective for a branch.
+BuildVariantKey = tuple[tuple[str, ...], Hashable, Hashable, tuple[str, ...]]
 
 
 def _freeze(obj: object) -> Hashable:
@@ -316,11 +323,12 @@ def _freeze(obj: object) -> Hashable:
 
 
 def variant_key(manifest: Manifest, spec: BranchSpec) -> BuildVariantKey:
-    """Return a cache key identifying the (bases, values, paths) effective for spec."""
+    """Return a cache key identifying the (bases, values, paths, excludes) effective for spec."""
     return (
         manifest.bases_for(spec),
         _freeze(manifest.values_for(spec)),
         _freeze(manifest.paths_for(spec)),
+        manifest.excludes_for(spec),
     )
 
 
@@ -360,6 +368,7 @@ def build_per_variant(
                 bases=manifest.bases_for(spec),
                 values=manifest.values_for(spec),
                 paths=manifest.paths_for(spec),
+                excludes=manifest.excludes_for(spec),
             )
             build = build_overlay_files(config_root, effective, repo=repo, org=org)
             builds[key] = build
