@@ -326,8 +326,8 @@ def load_root_config(config_root: Path) -> RootConfig:
     )
 
 
-def _parse_bases(path: Path, raw: object, label: str) -> tuple[str, ...]:
-    """Validate a 'bases'-like key as a list of non-empty strings and return it."""
+def _parse_string_list(path: Path, raw: object, label: str) -> tuple[str, ...]:
+    """Validate a key as a list of non-empty strings (bases / excludes) and return it."""
     if not isinstance(raw, list) or not all(isinstance(item, str) and item for item in raw):
         raise ConfigError(f"{path}: '{label}' must be a list of non-empty strings.")
     return tuple(raw)
@@ -353,7 +353,9 @@ def _parse_branch_spec(path: Path, item: object) -> BranchSpec:
                 f"{path}: an object element of 'branches' must specify 'name' as a "
                 "non-empty string."
             )
-        bases = _parse_bases(path, item["bases"], "branches[].bases") if "bases" in item else None
+        bases = (
+            _parse_string_list(path, item["bases"], "branches[].bases") if "bases" in item else None
+        )
         values = (
             _parse_values_mapping(path, item["values"], "branches[].values")
             if "values" in item
@@ -365,7 +367,7 @@ def _parse_branch_spec(path: Path, item: object) -> BranchSpec:
             else None
         )
         excludes = (
-            _parse_bases(path, item["excludes"], "branches[].excludes")
+            _parse_string_list(path, item["excludes"], "branches[].excludes")
             if "excludes" in item
             else None
         )
@@ -501,12 +503,12 @@ def load_manifest(config_root: Path, overlay: str) -> Manifest:
     data = _load_yaml_mapping(path)
 
     return Manifest(
-        bases=_parse_bases(path, data.get("bases", []), "bases"),
+        bases=_parse_string_list(path, data.get("bases", []), "bases"),
         branches=_parse_branches(path, data),
         deploy_mode=_parse_deploy_mode(path, data),
         values=_parse_values(path, data),
         paths=_parse_paths(path, data),
-        excludes=_parse_bases(path, data.get("excludes", []), "excludes"),
+        excludes=_parse_string_list(path, data.get("excludes", []), "excludes"),
     )
 
 
