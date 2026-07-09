@@ -67,13 +67,18 @@ ghfanout build example-service
 ```
 
 ```text
-example-service: wrote 2 file(s) to /path/to/my-config/dist/example-service
+example-service -> /path/to/my-config/dist/example-service (2 files: 1 rendered)
+
+Summary
+  1 built  example-service
 ```
 
 Look inside `dist/example-service/`:
 
 - `.gitignore` — copied as-is from `base/common/`
 - `pom.xml` — rendered from `base/java-service/pom.xml.jinja`, with `{{ repo }}` replaced by the repository name (see [Templates](templates.md))
+
+Add `--detail` to see this provenance directly in the output — every file is listed with the profile it came from and how it was transformed (see [CLI Reference](cli.md#output)).
 
 ## 4. Set up authentication
 
@@ -97,6 +102,10 @@ ghfanout deploy example-service --dry-run
 [dry-run] myorg/example-service@main:
   + .gitignore (new)
   + pom.xml (new)
+
+Summary (dry-run)
+  1 repository
+  1 would-change  example-service
 ```
 
 ## 6. Deploy
@@ -112,6 +121,10 @@ myorg/example-service@main:
   + .gitignore (new)
   + pom.xml (new)
   => Created PR: https://github.com/myorg/example-service/pull/1
+
+Summary
+  1 repository
+  1 created  example-service
 ```
 
 Review and merge the PR on GitHub as usual. When you later change a file under `base/` and deploy again, only repositories whose content actually differs get a PR — repositories that are already up to date report `no changes`.

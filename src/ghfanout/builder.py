@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Hashable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from jinja2 import Environment, StrictUndefined, TemplateSyntaxError, UndefinedError
@@ -40,17 +40,39 @@ _TEMPLATE_ENV = Environment(  # noqa: S701
 
 
 @dataclass(frozen=True)
+class FileProvenance:
+    """Where a distributed file came from and how it was transformed.
+
+    Attributes:
+        origin: Base profile the file was composed from (e.g. "common").
+        overrides: Lower-precedence profile whose same-path file this one
+            replaced, or None when nothing was overridden.
+        rendered: Whether the file was rendered from a .jinja template.
+        remapped_from: The pre-remap distribution path when a paths: entry
+            moved the file, or None when it stayed in place.
+    """
+
+    origin: str
+    overrides: str | None = None
+    rendered: bool = False
+    remapped_from: str | None = None
+
+
+@dataclass(frozen=True)
 class BuildResult:
     """Set of files produced by composing base profiles.
 
     Attributes:
         files: Mapping of POSIX-style relative path -> file content.
+        provenance: Per-file origin and transformation info, keyed by the same
+            distribution paths as files.
         unmatched_path_sources: Manifest paths: sources that matched no file in
             this build. Not an error by itself — build_per_variant judges
             across variants and rejects sources that match nowhere at all.
     """
 
     files: dict[str, bytes]
+    provenance: dict[str, FileProvenance] = field(default_factory=dict)
     unmatched_path_sources: frozenset[str] = frozenset()
 
 
@@ -78,19 +100,28 @@ def _render_template(
 
 def _render_templates(
     files: dict[str, bytes], *, repo: str, org: str, values: dict[str, object]
-) -> dict[str, bytes]:
-    """Render *.jinja files and replace them with the extension-stripped name."""
+) -> tuple[dict[str, bytes], dict[str, str]]:
+    """Render *.jinja files and replace them with the extension-stripped name.
+
+    Returns:
+        The rendered file set, and a map from each resulting path back to its
+        pre-render source path (a rendered file's key differs from its source;
+        a file copied as-is maps to itself).
+    """
     result: dict[str, bytes] = {}
+    render_origin: dict[str, str] = {}
     for rel_path, content in files.items():
         target = rel_path[: -len(TEMPLATE_SUFFIX)]
         # If the filename is exactly ".jinja", treat it as a hidden file, not a template.
         if not rel_path.endswith(TEMPLATE_SUFFIX) or not target or target.endswith("/"):
             result[rel_path] = content
+            render_origin[rel_path] = rel_path
             continue
         if target in files:
             raise BuildError(f"Both {target} and {rel_path} exist. Please keep only one of them.")
         result[target] = _render_template(rel_path, content, repo=repo, org=org, values=values)
-    return result
+        render_origin[target] = rel_path
+    return result, render_origin
 
 
 def _render_remap_dest(
@@ -162,7 +193,7 @@ def _apply_path_remaps(
     repo: str,
     org: str,
     values: dict[str, object],
-) -> tuple[dict[str, bytes], frozenset[str]]:
+) -> tuple[dict[str, bytes], frozenset[str], dict[str, str]]:
     """Apply the manifest's paths: remaps to the rendered file set.
 
     Destinations are first rendered as Jinja templates (values / repo / org),
@@ -176,15 +207,16 @@ def _apply_path_remaps(
     b -> c) are fine, for directories as well as files.
 
     Returns:
-        The remapped files, and the sources that matched no file (judged
-        across variants by build_per_variant, not an error here).
+        The remapped files, the sources that matched no file (judged across
+        variants by build_per_variant, not an error here), and a map from each
+        remapped distribution path back to its pre-remap path.
 
     Raises:
         BuildError: If a destination fails to render or is invalid after
             rendering, or two files would end up at the same distribution path.
     """
     if not paths:
-        return files, frozenset()
+        return files, frozenset(), {}
     rendered_paths = {
         source: _render_remap_dest(source, dest, repo=repo, org=org, values=values)
         for source, dest in paths.items()
@@ -218,7 +250,14 @@ def _apply_path_remaps(
             )
         origins[new_path] = rel_path
         result[new_path] = files[rel_path]
-    return result, frozenset(paths) - matched_sources
+    # A noop entry (source == destination) does not move the file, so it is
+    # not recorded as a remap.
+    remapped_from = {
+        new_path: source
+        for new_path, source in origins.items()
+        if source in matched_files and new_path != source
+    }
+    return result, frozenset(paths) - matched_sources, remapped_from
 
 
 def _load_ignore_spec(config_root: Path) -> GitIgnoreSpec:
@@ -267,6 +306,7 @@ def build_overlay_files(
 
     files: dict[str, bytes] = {}
     origins: dict[str, str] = {}
+    overridden: dict[str, str] = {}
     for profile in profiles:
         profile_dir = config_root / BASE_DIR_NAME / profile
         if not profile_dir.is_dir():
@@ -290,14 +330,25 @@ def build_overlay_files(
                     origins[rel_path],
                     profile,
                 )
+                overridden[rel_path] = origins[rel_path]
             files[rel_path] = file_path.read_bytes()
             origins[rel_path] = profile
 
-    rendered = _render_templates(files, repo=repo, org=org, values=manifest.values)
-    remapped, unmatched = _apply_path_remaps(
+    rendered, render_origin = _render_templates(files, repo=repo, org=org, values=manifest.values)
+    remapped, unmatched, remap_origin = _apply_path_remaps(
         rendered, manifest.paths, repo=repo, org=org, values=manifest.values
     )
-    return BuildResult(files=remapped, unmatched_path_sources=unmatched)
+    provenance: dict[str, FileProvenance] = {}
+    for dist_path in remapped:
+        pre_remap = remap_origin.get(dist_path, dist_path)
+        pre_render = render_origin[pre_remap]
+        provenance[dist_path] = FileProvenance(
+            origin=origins[pre_render],
+            overrides=overridden.get(pre_render),
+            rendered=pre_remap != pre_render,
+            remapped_from=remap_origin.get(dist_path),
+        )
+    return BuildResult(files=remapped, provenance=provenance, unmatched_path_sources=unmatched)
 
 
 # Key identifying a unique combination of build inputs (bases, values, and paths)

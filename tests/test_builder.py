@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from ghfanout.builder import (
+    FileProvenance,
     build_overlay_files,
     build_per_variant,
     variant_key,
@@ -572,6 +573,72 @@ class TestPathRemapping:
 
         with pytest.raises(BuildError, match=re.escape("both map to 'same.txt'")):
             build_overlay_files(config_repo, manifest, repo="user-service", org="myorg")
+
+
+class TestFileProvenance:
+    def test_records_origin_profile_for_each_file(self, config_repo: Path) -> None:
+        result = build_overlay_files(
+            config_repo, Manifest(bases=("java-service",)), repo="user-service", org="myorg"
+        )
+
+        # Provenance covers exactly the distributed files
+        assert set(result.provenance) == set(result.files)
+        assert result.provenance[".github/CODEOWNERS"] == FileProvenance(origin="common")
+        assert result.provenance["pom.xml"] == FileProvenance(origin="java-service")
+
+    def test_records_overridden_profile_when_later_profile_wins(self, config_repo: Path) -> None:
+        result = build_overlay_files(
+            config_repo, Manifest(bases=("java-service",)), repo="user-service", org="myorg"
+        )
+
+        assert result.provenance[".gitignore"] == FileProvenance(
+            origin="java-service", overrides="common"
+        )
+
+    def test_marks_rendered_template_under_its_distribution_path(self, config_repo: Path) -> None:
+        java_dir = config_repo / "base" / "java-service"
+        (java_dir / "pom.xml").unlink()
+        (java_dir / "pom.xml.jinja").write_text(
+            "<artifactId>{{ repo }}</artifactId>\n", encoding="utf-8"
+        )
+
+        result = build_overlay_files(
+            config_repo, Manifest(bases=("java-service",)), repo="user-service", org="myorg"
+        )
+
+        assert result.provenance["pom.xml"] == FileProvenance(origin="java-service", rendered=True)
+        assert "pom.xml.jinja" not in result.provenance
+
+    def test_records_pre_remap_path_for_remapped_file(self, config_repo: Path) -> None:
+        manifest = Manifest(bases=("java-service",), paths={"pom.xml": "services/pom.xml"})
+
+        result = build_overlay_files(config_repo, manifest, repo="user-service", org="myorg")
+
+        assert result.provenance["services/pom.xml"] == FileProvenance(
+            origin="java-service", remapped_from="pom.xml"
+        )
+        assert "pom.xml" not in result.provenance
+
+    def test_rendered_then_remapped_file_keeps_both_marks(self, config_repo: Path) -> None:
+        java_dir = config_repo / "base" / "java-service"
+        (java_dir / "pom.xml").unlink()
+        (java_dir / "pom.xml.jinja").write_text(
+            "<artifactId>{{ repo }}</artifactId>\n", encoding="utf-8"
+        )
+        manifest = Manifest(bases=("java-service",), paths={"pom.xml": "services/pom.xml"})
+
+        result = build_overlay_files(config_repo, manifest, repo="user-service", org="myorg")
+
+        assert result.provenance["services/pom.xml"] == FileProvenance(
+            origin="java-service", rendered=True, remapped_from="pom.xml"
+        )
+
+    def test_noop_remap_to_same_path_is_not_marked_remapped(self, config_repo: Path) -> None:
+        manifest = Manifest(bases=("java-service",), paths={"pom.xml": "pom.xml"})
+
+        result = build_overlay_files(config_repo, manifest, repo="user-service", org="myorg")
+
+        assert result.provenance["pom.xml"] == FileProvenance(origin="java-service")
 
 
 class TestVariantKey:
