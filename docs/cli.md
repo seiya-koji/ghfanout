@@ -38,9 +38,9 @@ ghfanout build -o /tmp/x               # Output all repositories to /tmp/x/<over
 Behavior:
 
 - The output directory is wiped before each build, so files removed from your base profiles are not left behind
-- Files matched by the config repository's `.ghfanoutignore` are excluded from the output — see [Configuration](configuration.md#ghfanoutignore)
+- Files matched by the config repository's `.ghfanoutignore`, or by the manifest's `excludes:`, are excluded from the output — see [Configuration](configuration.md#ghfanoutignore) and [Exclude files](configuration.md#exclude-files-excludes)
 - Running `build` with the overlay omitted builds all repositories under `overlays/`. Like `deploy --all`, it does not stop on a single failure — it tries all of them before exiting non-zero
-- Building an overlay that has a per-branch `bases`, `values`, or `paths` override writes output per branch to `<output>/<branch name>/` (without an override, a single set is written directly under `<output>/`)
+- Building an overlay that has a per-branch `bases`, `values`, `paths`, or `excludes` override writes output per branch to `<output>/<branch name>/` (without an override, a single set is written directly under `<output>/`)
 - Template (`*.jinja`) rendering errors, such as referencing an undefined variable, cause the build to fail ([Templates](templates.md))
 
 ## deploy

@@ -733,6 +733,79 @@ class TestLoadManifest:
         with pytest.raises(ConfigError, match="directory to a"):
             load_manifest(config_repo, "user-service")
 
+    def test_loads_excludes(self, config_repo: Path) -> None:
+        overlay_dir = config_repo / "overlays" / "user-service"
+        (overlay_dir / "manifest.yaml").write_text(
+            "bases:\n  - java-service\nexcludes:\n  - internal-notes.md\n  - drafts/\n",
+            encoding="utf-8",
+        )
+        manifest = load_manifest(config_repo, "user-service")
+        assert manifest.excludes == ("internal-notes.md", "drafts/")
+
+    def test_defaults_excludes_to_empty_tuple_when_omitted(self, config_repo: Path) -> None:
+        manifest = load_manifest(config_repo, "user-service")
+        assert manifest.excludes == ()
+
+    def test_can_override_excludes_per_branch_via_object_element(self, config_repo: Path) -> None:
+        overlay_dir = config_repo / "overlays" / "user-service"
+        (overlay_dir / "manifest.yaml").write_text(
+            "bases:\n  - java-service\n"
+            "excludes:\n  - drafts/\n"
+            "branches:\n  - main\n  - name: release-1.x\n    excludes:\n      - legacy/pom.xml\n",
+            encoding="utf-8",
+        )
+        manifest = load_manifest(config_repo, "user-service")
+        assert manifest.excludes == ("drafts/",)
+        assert manifest.branches == (
+            BranchSpec(name="main"),
+            BranchSpec(name="release-1.x", excludes=("legacy/pom.xml",)),
+        )
+
+    def test_excludes_for_appends_branch_override_after_top_level(self) -> None:
+        manifest = Manifest(
+            excludes=("drafts/", "*.tmp"),
+            branches=(
+                BranchSpec(name="main"),
+                BranchSpec(name="release-1.x", excludes=("legacy/pom.xml",)),
+                BranchSpec(name="minimal", excludes=()),
+            ),
+        )
+        # No excludes key (None) inherits the top level as-is
+        assert manifest.excludes_for(manifest.branches[0]) == ("drafts/", "*.tmp")
+        # Branch patterns are appended, order preserved (gitignore is order-sensitive)
+        assert manifest.excludes_for(manifest.branches[1]) == ("drafts/", "*.tmp", "legacy/pom.xml")
+        # An empty branch override changes nothing (it's a union, not a replacement)
+        assert manifest.excludes_for(manifest.branches[2]) == ("drafts/", "*.tmp")
+
+    def test_has_branch_specific_build_reflects_excludes_override(self) -> None:
+        with_excludes = Manifest(
+            bases=("java-service",),
+            branches=(BranchSpec(name="release-1.x", excludes=("legacy/pom.xml",)),),
+        )
+        assert with_excludes.has_branch_specific_build is True
+
+    def test_raises_config_error_when_excludes_is_not_a_string_list(
+        self, config_repo: Path
+    ) -> None:
+        overlay_dir = config_repo / "overlays" / "user-service"
+        (overlay_dir / "manifest.yaml").write_text(
+            "bases:\n  - java-service\nexcludes:\n  key: value\n", encoding="utf-8"
+        )
+        with pytest.raises(ConfigError, match="excludes"):
+            load_manifest(config_repo, "user-service")
+
+    def test_raises_config_error_for_invalid_excludes_type_in_branch_object(
+        self, config_repo: Path
+    ) -> None:
+        overlay_dir = config_repo / "overlays" / "user-service"
+        (overlay_dir / "manifest.yaml").write_text(
+            "bases:\n  - java-service\n"
+            "branches:\n  - name: release-1.x\n    excludes: not-a-list\n",
+            encoding="utf-8",
+        )
+        with pytest.raises(ConfigError, match=re.escape("branches[].excludes")):
+            load_manifest(config_repo, "user-service")
+
 
 class TestListOverlays:
     def test_returns_only_directories_with_manifest_sorted(self, config_repo: Path) -> None:
