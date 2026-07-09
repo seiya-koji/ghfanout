@@ -92,6 +92,11 @@ select = [
 convention = "google"
 
 [tool.ruff.lint.per-file-ignores]
+"src/ghfanout/cli.py" = [
+    # Typer commands take ctx + one argument per CLI option, so the argument
+    # count naturally exceeds PLR0913's limit; it does not signal a refactor here.
+    "PLR0913",
+]
 "tests/**" = [
     "S101",    # assert is fundamental to tests
     "D1",      # test docstrings are unnecessary (descriptive test names serve that purpose)

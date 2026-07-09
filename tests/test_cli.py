@@ -708,3 +708,65 @@ class TestDeployCommand:
         (repo_entry,) = report["repositories"]
         (branch_entry,) = repo_entry["branches"]
         assert branch_entry["status"] == "would_change"
+
+    def test_show_diff_prints_unified_diff_of_changed_files(
+        self, config_repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A multi-line .gitignore so the diff includes unchanged context lines
+        (config_repo / "base" / "java-service" / ".gitignore").write_bytes(
+            b"target/\nbuild/\n*.class\n"
+        )
+        repo = make_dry_runnable_repo("myorg/user-service")
+
+        def get_contents(path: str, ref: str) -> MagicMock:
+            if path != ".gitignore":
+                raise UnknownObjectException(404, {"message": "Not Found"}, None)
+            content = MagicMock(name=f"ContentFile({path}@{ref})")
+            content.decoded_content = b"target/\nbuild/\n*.log\n"  # only the last line differs
+            return content
+
+        repo.get_contents.side_effect = get_contents
+        gh = MagicMock(name="Github")
+        gh.get_repo.return_value = repo
+        monkeypatch.setattr("ghfanout.cli.create_github_client", lambda _config: gh)
+
+        result = runner.invoke(
+            app, ["-C", str(config_repo), "deploy", "user-service", "--dry-run", "--show-diff"]
+        )
+
+        assert result.exit_code == 0, result.output
+        # updated file: git-style headers, an unchanged context line, and -/+ lines
+        assert "--- a/.gitignore" in result.stdout
+        assert "+++ b/.gitignore" in result.stdout
+        assert "@@" in result.stdout
+        assert " build/" in result.stdout  # unchanged context line
+        assert "-*.log" in result.stdout
+        assert "+*.class" in result.stdout
+        # a new file uses /dev/null as its "from" header
+        assert "--- /dev/null" in result.stdout
+        assert "+++ b/pom.xml" in result.stdout
+
+    def test_show_diff_reports_binary_files_without_diffing(
+        self, config_repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A non-UTF-8 file in the build output cannot be shown as a text diff
+        (config_repo / "base" / "java-service" / "logo.png").write_bytes(b"\x89PNG\xff\x00")
+        repo = make_dry_runnable_repo("myorg/user-service")  # every file is new
+        gh = MagicMock(name="Github")
+        gh.get_repo.return_value = repo
+        monkeypatch.setattr("ghfanout.cli.create_github_client", lambda _config: gh)
+
+        result = runner.invoke(
+            app, ["-C", str(config_repo), "deploy", "user-service", "--dry-run", "--show-diff"]
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "logo.png: Binary file (diff not shown)" in result.stdout
+
+    def test_show_diff_cannot_be_combined_with_json(self, config_repo: Path) -> None:
+        result = runner.invoke(
+            app, ["-C", str(config_repo), "deploy", "user-service", "--show-diff", "--json"]
+        )
+
+        assert result.exit_code == 1
+        assert "--show-diff" in result.stderr
