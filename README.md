@@ -10,6 +10,7 @@
 
 - **No `git clone` of target repositories** — everything goes through the GitHub Git Data API, so it works with nothing more than `pip install`
 - **Kustomize-like base + overlay composition**, with Jinja2 templating for per-repository values and per-repository remapping of distribution paths
+- **Fleet-wide summaries and machine-readable reports** — `build` and `deploy` end with a summary of what happened everywhere, and `--json` emits a full report for CI and chat integrations
 - **Designed for microservice fleets** that cannot be consolidated into a monorepo
 
 ## Installation
@@ -35,7 +36,16 @@ cd my-config
 
 # 2. Compose base + overlay locally and inspect the result (no git operations, no network)
 ghfanout build example-service           # output: dist/example-service/
+```
 
+```text
+example-service -> dist/example-service (2 files: 1 rendered)
+
+Summary
+  1 built  example-service
+```
+
+```bash
 # 3. Authenticate, preview the diff against the real repository, then deploy
 export GHFANOUT_TOKEN=ghp_xxxx
 ghfanout deploy example-service --dry-run
